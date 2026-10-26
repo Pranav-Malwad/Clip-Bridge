@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ClipBridge.Protocol/ClipBridge.Protocol.csproj" />
+    <Project Path="src/ClipBridge.Windows/ClipBridge.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ClipBridge.Protocol.Tests/ClipBridge.Protocol.Tests.csproj" />
+    <Project Path="tests/ClipBridge.Windows.Tests/ClipBridge.Windows.Tests.csproj" />
+  </Folder>
+</Solution>
