@@ -11,16 +11,20 @@ public interface IClipboardService
 
 public sealed class ClipboardCoordinator(
     IClipboardService clipboard,
-    Func<string, Task> sendAsync)
+    Func<string, Task> sendAsync,
+    SensitiveContentPolicy? contentPolicy = null,
+    Func<string?>? sourceProcess = null)
 {
     private string? _lastObserved;
     private string? _suppressOnce;
 
     public bool IsPaused { get; set; }
+    public bool IsManualMode { get; set; }
+    public event Action<ContentDecision>? ContentBlocked;
 
     public async Task HandleLocalClipboardChangedAsync()
     {
-        if (IsPaused)
+        if (IsPaused || IsManualMode)
         {
             return;
         }
@@ -40,6 +44,13 @@ public sealed class ClipboardCoordinator(
 
         if (Encoding.UTF8.GetByteCount(text) > ClipboardProtocol.MaxPayloadBytes)
         {
+            return;
+        }
+
+        var decision = contentPolicy?.Evaluate(text, sourceProcess?.Invoke()) ?? ContentDecision.Allow;
+        if (decision != ContentDecision.Allow)
+        {
+            ContentBlocked?.Invoke(decision);
             return;
         }
 

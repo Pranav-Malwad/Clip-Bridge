@@ -21,6 +21,17 @@ public sealed class DpapiSecretProtector : ISecretProtector
 
 public sealed class PairingStore(string path, ISecretProtector protector)
 {
+    private string PairedMarkerPath => path + ".paired";
+
+    public bool IsPaired => File.Exists(PairedMarkerPath);
+
+    public void MarkPaired()
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+        File.WriteAllText(PairedMarkerPath, "2");
+    }
+
     public byte[] LoadOrCreate()
     {
         if (File.Exists(path))
@@ -37,6 +48,7 @@ public sealed class PairingStore(string path, ISecretProtector protector)
 
     public byte[] Rotate()
     {
+        if (File.Exists(PairedMarkerPath)) File.Delete(PairedMarkerPath);
         var secret = RandomNumberGenerator.GetBytes(32);
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))

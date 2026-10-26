@@ -55,6 +55,23 @@ class SyncService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_SEND_TEXT -> intent.getStringExtra(EXTRA_TEXT)?.let(pending::add)
+            ACTION_PRIVATE_10 -> {
+                val store = PairingStore(this)
+                store.setPauseUntil(System.currentTimeMillis() + 10 * 60_000L)
+                connected = false
+                sessionKeys = null
+                socket?.cancel()
+                socket = null
+                SyncState.update(ConnectionStatus.PAUSED, "Private Mode is on for 10 minutes.")
+                updateOngoing("Private Mode — resumes automatically")
+                handler.postDelayed({
+                    if (running) {
+                        store.setPauseUntil(0)
+                        connect()
+                    }
+                }, 10 * 60_000L)
+                return START_STICKY
+            }
         }
 
         val storedPairing = PairingStore(this).load()
@@ -71,6 +88,14 @@ class SyncService : Service() {
 
         running = true
         PairingStore(this).setSyncEnabled(true)
+        val remainingPause = PairingStore(this).pauseUntil() - System.currentTimeMillis()
+        if (remainingPause > 0) {
+            SyncState.update(ConnectionStatus.PAUSED, "Private Mode is on.")
+            updateOngoing("Private Mode — resumes automatically")
+            handler.postDelayed({ if (running) connect() }, remainingPause)
+            return START_STICKY
+        }
+        PairingStore(this).setPauseUntil(0)
         if (connected) drainPending() else if (socket == null) connect()
         return START_STICKY
     }
@@ -116,6 +141,12 @@ class SyncService : Service() {
                 socket = null
                 SyncState.update(ConnectionStatus.ERROR, "Cannot reach ${paired.name}; retrying.")
                 updateOngoing("Disconnected; retrying…")
+                val discovered = DiscoveryClient.discover(paired)
+                if (discovered != null) {
+                    pairing = discovered
+                    PairingStore(this@SyncService).save(discovered)
+                    reconnectDelay = 1_000L
+                }
                 scheduleReconnect()
             }
 
@@ -154,10 +185,11 @@ class SyncService : Service() {
     private fun deliverIncoming(text: String) {
         handler.post {
             ClipboardWriter.write(this, text)
-            val copyIntent = Intent(this, CopyReceiver::class.java).putExtra(CopyReceiver.EXTRA_TEXT, text)
+            val token = ClipboardVault.instance.put(text)
+            val copyIntent = Intent(this, CopyReceiver::class.java).putExtra(CopyReceiver.EXTRA_TOKEN, token)
             val copyAction = PendingIntent.getBroadcast(
                 this,
-                text.hashCode(),
+                token.hashCode(),
                 copyIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -214,6 +246,7 @@ class SyncService : Service() {
         const val ACTION_START = "com.clipbridge.app.action.START"
         const val ACTION_STOP = "com.clipbridge.app.action.STOP"
         const val ACTION_SEND_TEXT = "com.clipbridge.app.action.SEND_TEXT"
+        const val ACTION_PRIVATE_10 = "com.clipbridge.app.action.PRIVATE_10"
         const val EXTRA_TEXT = "com.clipbridge.app.extra.TEXT"
         private const val ONGOING_CHANNEL = "clipbridge_connection"
         private const val TRANSFER_CHANNEL = "clipbridge_transfers"

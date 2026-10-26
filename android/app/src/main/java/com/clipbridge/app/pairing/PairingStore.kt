@@ -31,8 +31,15 @@ class PairingStore(context: Context) {
         preferences.edit().putBoolean(KEY_SYNC_ENABLED, enabled).apply()
     }
 
+    fun pauseUntil(): Long = preferences.getLong(KEY_PAUSE_UNTIL, 0L)
+
+    fun setPauseUntil(value: Long) {
+        preferences.edit().putLong(KEY_PAUSE_UNTIL, value).apply()
+    }
+
     private companion object {
         const val KEY_URI = "pairing_uri"
         const val KEY_SYNC_ENABLED = "sync_enabled"
+        const val KEY_PAUSE_UNTIL = "pause_until"
     }
 }

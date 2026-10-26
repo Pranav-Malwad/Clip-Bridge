@@ -6,9 +6,10 @@ ClipBridge privately moves copied text between one Windows laptop and one Androi
 
 - Copy text on Windows; it is encrypted, sent to Android, placed on the phone clipboard, and accompanied by a **Copy** notification fallback.
 - On Android, select text in any app, tap **Share**, and choose **Send to PC**; it becomes the Windows clipboard.
-- Pair without an account by scanning the QR code shown by the Windows app.
+- Pair without an account by scanning the short-lived QR invitation shown by the Windows app.
+- Reconnect automatically with authenticated LAN discovery when the laptop's local IP address changes.
 - Pause syncing, rotate the Windows pairing code, or forget the PC from Android.
-- Text is limited to 256 KiB, never stored as clipboard history, authenticated with AES-256-GCM, replay-protected, and accepted only for five minutes.
+- Each connection derives fresh directional AES-256-GCM keys with authenticated ephemeral ECDH; text is limited to 256 KiB and never stored as clipboard history.
 
 ## Install the development build
 
@@ -19,7 +20,7 @@ ClipBridge privately moves copied text between one Windows laptop and one Androi
 3. If Windows Firewall asks, allow access on **Private networks** only.
 4. Leave ClipBridge running in the notification area.
 
-The development executable is self-contained and does not require a separate .NET installation. It is not code-signed, so Windows may show a SmartScreen warning. Public distribution requires an owner-controlled signing certificate.
+The development executable is self-contained and does not require a separate .NET installation. For a searchable Start Menu entry and automatic startup, run `dist\installer\Install-ClipBridge.ps1`. The build is not code-signed, so Windows may show a SmartScreen warning. Public distribution requires an owner-controlled signing certificate.
 
 ### Android
 
@@ -38,11 +39,19 @@ The APK is signed with Android's development key and is intended for local testi
 
 Use **Pair a new phone** on Windows to revoke the old pairing secret. Use **Forget this PC** on Android before pairing with a different computer.
 
+## Privacy modes
+
+- **Smart Sync** is the default. Likely secrets and copies from common password managers are blocked locally with generic feedback.
+- **Private Mode** pauses transfers for ten minutes and resumes automatically.
+- **Manual mode** disables automatic Windows clipboard sharing.
+
+Sensitive detection is defense in depth, not a replacement for a password manager. Read [`PRIVACY.md`](PRIVACY.md) and [`SECURITY.md`](SECURITY.md) before distributing ClipBridge.
+
 ## Security boundaries
 
-- Clipboard content is encrypted end-to-end at the application layer; the local WebSocket itself is cleartext, so IP addresses, timing, and message sizes remain observable on the LAN.
-- Anyone who scans or photographs the pairing QR code while it is visible obtains the pairing secret. Rotate pairing afterward if the code may have been exposed.
-- Clipboard managers inherently process sensitive data. Pause ClipBridge before copying passwords, recovery phrases, payment details, or other secrets.
+- Clipboard content is encrypted end-to-end at the application layer with a fresh key per connection; IP addresses, timing, and approximate message sizes remain observable on the LAN.
+- Treat a visible pairing QR as private and rotate pairing if it may have been photographed.
+- Clipboard managers inherently process sensitive data. Smart Sync reduces accidental sharing but cannot identify every secret.
 - ClipBridge has no cloud service and cannot sync across unrelated networks.
 
 ## Build from source

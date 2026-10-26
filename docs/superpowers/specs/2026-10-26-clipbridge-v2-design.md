@@ -8,7 +8,7 @@ Make ClipBridge safe and simple enough to share with a small trusted circle. Pai
 
 - Keep a trusted Windows/Android relationship until the user explicitly forgets it or app data is removed.
 - Authenticate every reconnect and derive a fresh ephemeral encryption key for each connection.
-- Make the QR invitation short-lived and unusable after the first successful pairing.
+- Make the official QR invitation short-lived; document that photographed credentials require rotation until device-identity enrollment is added.
 - Recover from laptop IP changes using local discovery with a saved-address fallback.
 - Prevent duplicate Windows processes, start cleanly with Windows, and install with searchable shortcuts.
 - Block likely sensitive clipboard values by default without storing or logging clipboard content.
@@ -27,7 +27,7 @@ Make ClipBridge safe and simple enough to share with a small trusted circle. Pai
 
 Use a persistent OS-protected trust secret for mutual authentication, but never use it directly to encrypt clipboard payloads. Each WebSocket connection performs an authenticated ephemeral ECDH P-256 handshake and derives directional AES-256-GCM session keys using HKDF-SHA256. P-256 is selected instead of X25519 because it is supported by the existing Windows and Android API 29 baselines without adding a cryptographic provider.
 
-The QR carries a random bootstrap trust secret, pairing identifier, address, port, and expiration. Windows accepts it only before expiry and only until the first authenticated pairing. The same secret becomes the OS-protected reconnect credential on both devices; after pairing, Windows hides and invalidates the invitation while retaining the trusted credential. Re-pairing rotates the credential and revokes the old phone.
+The QR carries a random trust secret, pairing identifier, address, port, and expiration. The official Android client rejects it after expiry. The same secret becomes the OS-protected reconnect credential on both devices. Re-pairing rotates the credential and revokes the old phone. A photographed QR can still be used by a custom client until rotation; binding trust to a hardware-backed client identity is a required hardening step before public distribution.
 
 Alternatives considered:
 
@@ -44,7 +44,7 @@ Alternatives considered:
 5. Clipboard envelopes continue to carry authenticated version, ID, timestamp, direction, nonce, ciphertext, and tag, but use the appropriate directional session key.
 6. Pairing completion is persisted only after the authenticated handshake succeeds. Session keys are erased when the socket closes.
 
-Replay IDs are persisted for the five-minute acceptance window on both platforms with bounded storage. Handshake challenges are random, so reconnecting always yields different session keys.
+Replay IDs are retained for the life of each session. Handshake challenges are random and reconnecting yields different session keys, so frames captured from an earlier session cannot authenticate in a later one; cross-restart replay persistence is therefore unnecessary.
 
 ## Discovery and Reconnection
 

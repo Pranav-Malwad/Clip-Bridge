@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Collections.Concurrent;
 using System.Text;
 using ClipBridge.Protocol;
 using Microsoft.AspNetCore.Builder;
@@ -12,6 +13,8 @@ namespace ClipBridge.Windows;
 public sealed class ClipBridgeServer(byte[] secret, string pairingId, int port) : IAsyncDisposable
 {
     private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private readonly SemaphoreSlim _connectionLimit = new(4, 4);
+    private readonly ConcurrentDictionary<string, Queue<DateTimeOffset>> _authenticationFailures = new();
     private WebApplication? _application;
     private SessionConnection? _client;
 
@@ -67,6 +70,23 @@ public sealed class ClipBridgeServer(byte[] secret, string pairingId, int port) 
 
     private async Task HandleConnectionAsync(HttpContext context)
     {
+        if (!await _connectionLimit.WaitAsync(0, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return;
+        }
+        try { await HandleAcceptedConnectionAsync(context).ConfigureAwait(false); }
+        finally { _connectionLimit.Release(); }
+    }
+
+    private async Task HandleAcceptedConnectionAsync(HttpContext context)
+    {
+        var remoteAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        if (IsAuthenticationBlocked(remoteAddress, DateTimeOffset.UtcNow))
+        {
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            return;
+        }
         if (!context.WebSockets.IsWebSocketRequest)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -98,6 +118,7 @@ public sealed class ClipBridgeServer(byte[] secret, string pairingId, int port) 
         var clientHello = SessionProtocol.Deserialize<ClientHello>(firstMessage);
         if (clientHello is null || clientHello.PairingId != pairingId || !SessionProtocol.VerifyClientHello(clientHello, secret))
         {
+            RememberAuthenticationFailure(remoteAddress, DateTimeOffset.UtcNow);
             await SafeCloseAsync(socket, WebSocketCloseStatus.PolicyViolation, "Authentication failed.").ConfigureAwait(false);
             return;
         }
@@ -146,6 +167,26 @@ public sealed class ClipBridgeServer(byte[] secret, string pairingId, int port) 
             {
                 ConnectionChanged?.Invoke(false);
             }
+        }
+    }
+
+    private void RememberAuthenticationFailure(string address, DateTimeOffset now)
+    {
+        var failures = _authenticationFailures.GetOrAdd(address, _ => new Queue<DateTimeOffset>());
+        lock (failures)
+        {
+            while (failures.TryPeek(out var oldest) && now - oldest > TimeSpan.FromMinutes(1)) failures.Dequeue();
+            failures.Enqueue(now);
+        }
+    }
+
+    private bool IsAuthenticationBlocked(string address, DateTimeOffset now)
+    {
+        if (!_authenticationFailures.TryGetValue(address, out var failures)) return false;
+        lock (failures)
+        {
+            while (failures.TryPeek(out var oldest) && now - oldest > TimeSpan.FromMinutes(1)) failures.Dequeue();
+            return failures.Count >= 5;
         }
     }
 
@@ -205,6 +246,7 @@ public sealed class ClipBridgeServer(byte[] secret, string pairingId, int port) 
         }
 
         _sendGate.Dispose();
+        _connectionLimit.Dispose();
     }
 
     private sealed record SessionConnection(WebSocket Socket, SessionKeys Keys);

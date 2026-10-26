@@ -16,7 +16,7 @@
 - Plain UTF-8 text only, maximum 256 KiB, with no clipboard history or content logging.
 - Android API 29+ and Windows 10 1809+ x64.
 - Pair once; restarts, temporary network loss, and DHCP address changes must not require another scan.
-- QR invitation expires after two minutes and is consumed by the first authenticated pairing.
+- Official QR invitations expire after two minutes; suspected screenshots require pairing rotation until hardware-backed client identity enrollment is implemented.
 - Authentication must finish within five seconds; session keys are connection-scoped and directional.
 - Smart Sync blocks likely sensitive content by default; classification is defense in depth, not a guarantee.
 - Release signing requires owner-controlled credentials and must never embed keys in the repository.
@@ -51,19 +51,18 @@
 - [ ] Run focused and full suites; confirm GREEN and cross-language fixtures match.
 - [ ] Commit the independently working protocol migration.
 
-### Task 2: Durable replay state and hardened connection admission
+### Task 2: Session replay state and hardened connection admission
 
 **Files:**
-- Create: `src/ClipBridge.Protocol/PersistentReplayCache.cs`
 - Modify: `src/ClipBridge.Windows/ClipBridgeServer.cs`
-- Create/modify: Android replay persistence and `SyncService.kt`
+- Modify: Android session handling and `SyncService.kt`
 - Test: server integration and Android protocol tests
 
-**Interfaces:** Produces bounded replay stores, five-second authentication cancellation, connection limits, and per-address failure throttling.
+**Interfaces:** Produces connection-scoped replay stores, five-second authentication cancellation, connection limits, and per-address failure throttling. Fresh ephemeral keys make prior-session frames invalid after reconnect or restart.
 
-- [ ] Write failing restart-replay, slow-authentication, and repeated-invalid-authentication tests.
+- [ ] Write failing session-replay, slow-authentication, and repeated-invalid-authentication tests.
 - [ ] Verify expected RED failures.
-- [ ] Implement atomic protected replay persistence and admission controls without retaining payloads.
+- [ ] Implement bounded session replay state and admission controls without retaining payloads.
 - [ ] Run focused and full suites; confirm GREEN.
 - [ ] Commit connection hardening.
 

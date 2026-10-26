@@ -15,12 +15,14 @@ public sealed class PairingAndMessageTests : IDisposable
         var store = new PairingStore(path, new IdentityProtector());
 
         var first = store.LoadOrCreate();
+        store.MarkPaired();
         var second = store.LoadOrCreate();
         var rotated = store.Rotate();
 
         Assert.Equal(first, second);
         Assert.NotEqual(first, rotated);
         Assert.Equal(32, rotated.Length);
+        Assert.False(store.IsPaired);
     }
 
     [Fact]

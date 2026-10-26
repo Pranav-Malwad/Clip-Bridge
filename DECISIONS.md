@@ -6,7 +6,7 @@ This file records product and engineering decisions made for the initial ClipBri
 
 - ClipBridge will use a **pair once, trust until revoked** model. Restarting either device, losing Wi-Fi, sleeping the laptop, or receiving a new LAN address must not require pairing again.
 - The selected architecture is a persistent OS-protected trust credential plus an authenticated ephemeral P-256 ECDH handshake for every connection. HKDF-SHA256 derives independent directional AES-256-GCM keys. P-256 is used instead of X25519 to retain Android API 29 support without adding a cryptographic provider.
-- The pairing QR is a two-minute, single-use invitation. It is hidden and invalidated after the first authenticated pairing; the trusted credential remains protected by DPAPI and Android Keystore-backed storage.
+- The pairing QR carries a two-minute invitation expiry enforced by the official Android client. The trusted credential remains protected by DPAPI and Android Keystore-backed storage. A photographed QR is still a credential until full device-identity enrollment is implemented, so rotating pairing remains required after suspected exposure.
 - V1 pairings receive a one-time migration reset because the old record lacks invitation and device metadata. Future upgrades preserve trust.
 - Authenticated UDP discovery is added so Android can find the paired laptop after DHCP address changes. The saved address remains the fast first attempt and manual pairing remains a recovery path.
 - The Windows listener may bind local interfaces for resilience, but distribution creates a **Private-profile-only** firewall rule. Authentication has a five-second deadline, bounded concurrency, and per-address throttling.

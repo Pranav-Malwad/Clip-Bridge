@@ -28,4 +28,15 @@ try {
 Copy-Item (Join-Path $root 'android\app\build\outputs\apk\debug\app-debug.apk') `
     (Join-Path $dist 'ClipBridge-Android-debug.apk') -Force
 
+$installerOutput = Join-Path $dist 'installer'
+New-Item -ItemType Directory -Force $installerOutput | Out-Null
+Copy-Item (Join-Path $root 'installer\Install-ClipBridge.ps1') $installerOutput -Force
+Copy-Item (Join-Path $root 'installer\Uninstall-ClipBridge.ps1') $installerOutput -Force
+
+$checksums = Get-ChildItem -LiteralPath $dist -File -Recurse | Where-Object Name -ne 'SHA256SUMS.txt' | ForEach-Object {
+    $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
+    "$($hash.Hash)  $($_.FullName.Substring($dist.Length + 1))"
+}
+Set-Content -LiteralPath (Join-Path $dist 'SHA256SUMS.txt') -Value $checksums
+
 Write-Output "Build artifacts are in $dist"
