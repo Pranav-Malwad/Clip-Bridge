@@ -123,6 +123,23 @@ public sealed class ProtocolTests
     }
 
     [Fact]
+    public void SessionKeysMatchAndroidRawEcdhFixture()
+    {
+        using var client = SessionProtocol.CreateEphemeralKey();
+        using var server = SessionProtocol.CreateEphemeralKey();
+        client.ImportPkcs8PrivateKey(Convert.FromBase64String(
+            "MEECAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQcEJzAlAgEBBCAMeRdIhXtFgtEEbbm3XMw2L38llxXDCEDgQIl7qPc0Tg=="), out _);
+        server.ImportPkcs8PrivateKey(Convert.FromBase64String(
+            "MEECAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQcEJzAlAgEBBCC8V93NYnGBb/c9LA3rN2k129Br5UXiertgaN/Ayyx7gA=="), out _);
+        var hello = SessionProtocol.CreateClientHello("device-123", Secret, client, Enumerable.Range(0, 16).Select(i => (byte)i).ToArray());
+        var result = SessionProtocol.CreateServerHello(hello, Secret, server, Enumerable.Range(16, 16).Select(i => (byte)i).ToArray());
+
+        Assert.Equal(
+            "AIo5SM0Qs8/Gnd8Fyc5K6BYQl4wyYqvCfLR1lHVziJypEXcROUI1tl7Rv+/PheOwyexzDS/a35PUv+SaVTr54Q==",
+            Convert.ToBase64String(result.Keys.WindowsToAndroid.Concat(result.Keys.AndroidToWindows).ToArray()));
+    }
+
+    [Fact]
     public void DecryptsSharedCrossPlatformFixture()
     {
         var envelope = new ClipboardEnvelope(

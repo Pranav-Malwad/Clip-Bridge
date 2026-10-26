@@ -88,6 +88,10 @@ public sealed class ServerIntegrationTests
         Assert.NotNull(serverHello);
         var result = SessionProtocol.CompleteClientHandshake(hello, serverHello, secret, key);
         Assert.True(result.IsSuccess);
+        var finished = ClipboardProtocol.Encrypt("", TransferDirection.AndroidToWindows, result.Keys!.AndroidToWindows, DateTimeOffset.UtcNow);
+        await client.SendAsync(
+            Encoding.UTF8.GetBytes(ClipboardProtocol.Serialize(finished)), WebSocketMessageType.Text, true,
+            TestContext.Current.CancellationToken);
         return result.Keys!;
     }
 

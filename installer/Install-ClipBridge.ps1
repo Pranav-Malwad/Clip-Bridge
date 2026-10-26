@@ -6,7 +6,16 @@ $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\ClipB
 $startup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\ClipBridge.lnk'
 if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory 'ClipBridge.exe'))) { throw "ClipBridge.exe was not found in $SourceDirectory." }
 New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $SourceDirectory 'ClipBridge.exe') -Destination $executable -Force
+$stagedExecutable = Join-Path $installDirectory 'ClipBridge.exe.new'
+Copy-Item -LiteralPath (Join-Path $SourceDirectory 'ClipBridge.exe') -Destination $stagedExecutable -Force
+$installedProcesses = @(Get-Process -Name ClipBridge -ErrorAction SilentlyContinue | Where-Object {
+    try { $_.Path -and ([IO.Path]::GetFullPath($_.Path) -eq [IO.Path]::GetFullPath($executable)) } catch { $false }
+})
+if ($installedProcesses.Count -gt 0) {
+    $installedProcesses | Stop-Process
+    $installedProcesses | Wait-Process -Timeout 10
+}
+Move-Item -LiteralPath $stagedExecutable -Destination $executable -Force
 $shell = New-Object -ComObject WScript.Shell
 foreach ($shortcutPath in @($startMenu, $startup)) {
     if ($NoStartup -and $shortcutPath -eq $startup) { Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue; continue }

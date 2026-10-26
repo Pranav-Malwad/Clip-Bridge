@@ -113,6 +113,9 @@ class SyncService : Service() {
                 pendingKey = key
                 pendingHello = hello
                 webSocket.send(SessionProtocol.serialize(hello))
+                handler.postDelayed({
+                    if (!connected && socket === webSocket) webSocket.cancel()
+                }, 5_000L)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -123,6 +126,8 @@ class SyncService : Service() {
                     val result = SessionProtocol.completeClientHandshake(hello, serverHello, paired.secret, key)
                     sessionKeys = result.keys ?: return webSocket.cancel()
                     processor = InboundMessageProcessor(sessionKeys!!.windowsToAndroid)
+                    val finished = ClipboardProtocol.encrypt("", Direction.ANDROID_TO_WINDOWS, sessionKeys!!.androidToWindows)
+                    if (!webSocket.send(ClipboardProtocol.serialize(finished))) return webSocket.cancel()
                     pendingKey = null
                     pendingHello = null
                     connected = true
@@ -131,6 +136,7 @@ class SyncService : Service() {
                     drainPending()
                     return
                 }
+                if (!ReconnectPolicy.shouldReconnect(running, PairingStore(this@SyncService).pauseUntil())) return
                 val result = processor?.process(text) ?: return
                 result.text?.let(::deliverIncoming)
             }
@@ -141,6 +147,7 @@ class SyncService : Service() {
                 socket = null
                 SyncState.update(ConnectionStatus.ERROR, "Cannot reach ${paired.name}; retrying.")
                 updateOngoing("Disconnected; retrying…")
+                if (!ReconnectPolicy.shouldReconnect(running, PairingStore(this@SyncService).pauseUntil())) return
                 val discovered = DiscoveryClient.discover(paired)
                 if (discovered != null) {
                     pairing = discovered
@@ -165,6 +172,7 @@ class SyncService : Service() {
     }
 
     private fun drainPending() {
+        if (!ReconnectPolicy.shouldReconnect(running, PairingStore(this).pauseUntil())) return
         val active = socket ?: return
         val paired = pairing ?: return
         pending.drain { text -> sendNow(active, text, paired) }
@@ -177,8 +185,10 @@ class SyncService : Service() {
     }
 
     private fun scheduleReconnect() {
-        if (!running) return
-        handler.postDelayed({ if (running && socket == null) connect() }, reconnectDelay)
+        if (!ReconnectPolicy.shouldReconnect(running, PairingStore(this).pauseUntil())) return
+        handler.postDelayed({
+            if (ReconnectPolicy.shouldReconnect(running, PairingStore(this).pauseUntil()) && socket == null) connect()
+        }, reconnectDelay)
         reconnectDelay = (reconnectDelay * 2).coerceAtMost(30_000L)
     }
 
@@ -186,6 +196,7 @@ class SyncService : Service() {
         handler.post {
             ClipboardWriter.write(this, text)
             val token = ClipboardVault.instance.put(text)
+            handler.postDelayed({ ClipboardVault.instance.discard(token) }, 300_000L)
             val copyIntent = Intent(this, CopyReceiver::class.java).putExtra(CopyReceiver.EXTRA_TOKEN, token)
             val copyAction = PendingIntent.getBroadcast(
                 this,
@@ -233,6 +244,7 @@ class SyncService : Service() {
         running = false
         connected = false
         sessionKeys = null
+        ClipboardVault.instance.clear()
         handler.removeCallbacksAndMessages(null)
         socket?.cancel()
         socket = null

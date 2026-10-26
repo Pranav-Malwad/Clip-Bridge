@@ -22,7 +22,11 @@ public sealed class SingleInstanceCoordinator : IDisposable
         _listener = Task.Run(() =>
         {
             var handles = new WaitHandle[] { _activation, _stopping.Token.WaitHandle };
-            while (WaitHandle.WaitAny(handles) == 0) activated();
+            while (WaitHandle.WaitAny(handles) == 0)
+            {
+                try { activated(); }
+                catch (InvalidOperationException) { }
+            }
         });
     }
 

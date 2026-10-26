@@ -15,6 +15,7 @@ public sealed class MainForm : Form
     private readonly Button _repair = new() { Text = "Pair a new phone", AutoSize = true };
     private readonly Button _privateMode = new() { Text = "Private for 10 minutes", AutoSize = true };
     private readonly CheckBox _manualMode = new() { Text = "Manual mode (do not send copies automatically)", AutoSize = true };
+    private readonly Button _sendNow = new() { Text = "Send clipboard now", AutoSize = true, Visible = false };
     private readonly NotifyIcon _tray = new() { Text = "ClipBridge", Visible = true, Icon = SystemIcons.Application };
     private readonly System.Windows.Forms.Timer _clipboardTimer = new() { Interval = 400 };
     private readonly PairingStore _pairingStore;
@@ -41,7 +42,7 @@ public sealed class MainForm : Form
         _privacyStore = new PrivacySettingsStore(Path.Combine(appData, "privacy.json"));
         _privacy = _privacyStore.Load();
         _secret = _pairingStore.LoadOrCreate();
-        _coordinator = new ClipboardCoordinator(new WindowsClipboardService(), SendTextAsync, new SensitiveContentPolicy(), ForegroundProcess.TryGetName)
+        _coordinator = new ClipboardCoordinator(new WindowsClipboardService(), SendTextAsync, new SensitiveContentPolicy(), ClipboardOwnerProcess.TryGetName)
         {
             IsPaused = _privacy.IsPaused(DateTimeOffset.UtcNow),
             IsManualMode = _privacy.ManualMode
@@ -67,12 +68,14 @@ public sealed class MainForm : Form
         buttons.Controls.Add(_privateMode);
         layout.Controls.Add(buttons);
         layout.Controls.Add(_manualMode);
+        layout.Controls.Add(_sendNow);
         Controls.Add(layout);
 
         _pause.Click += (_, _) => TogglePause();
         _repair.Click += async (_, _) => await RotatePairingAsync();
         _privateMode.Click += (_, _) => EnablePrivateMode();
         _manualMode.CheckedChanged += (_, _) => SetManualMode(_manualMode.Checked);
+        _sendNow.Click += async (_, _) => await _coordinator.SendCurrentClipboardAsync();
         _clipboardTimer.Tick += async (_, _) => await PollClipboardAsync();
         _tray.DoubleClick += (_, _) => RestoreWindow();
         _tray.ContextMenuStrip = BuildTrayMenu();
@@ -193,6 +196,7 @@ public sealed class MainForm : Form
         _privacy = _privacy with { ManualMode = enabled };
         _privacyStore.Save(_privacy);
         _coordinator.IsManualMode = enabled;
+        _sendNow.Visible = enabled;
         if (enabled) SetStatus("Manual mode", "Automatic Windows clipboard sharing is off.");
     }
 

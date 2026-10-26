@@ -3,13 +3,13 @@ using System.Runtime.InteropServices;
 
 namespace ClipBridge.Windows;
 
-public static class ForegroundProcess
+public static class ClipboardOwnerProcess
 {
     public static string? TryGetName()
     {
         try
         {
-            var window = GetForegroundWindow();
+            var window = GetClipboardOwner();
             _ = GetWindowThreadProcessId(window, out var processId);
             return processId == 0 ? null : Process.GetProcessById((int)processId).ProcessName;
         }
@@ -17,7 +17,7 @@ public static class ForegroundProcess
     }
 
     [DllImport("user32.dll")]
-    private static extern nint GetForegroundWindow();
+    private static extern nint GetClipboardOwner();
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
 }

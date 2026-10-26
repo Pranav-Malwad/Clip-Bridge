@@ -23,14 +23,20 @@ public sealed class ClipboardCoordinator(
     public event Action<ContentDecision>? ContentBlocked;
 
     public async Task HandleLocalClipboardChangedAsync()
+        => await SendClipboardAsync(manualOverride: false).ConfigureAwait(true);
+
+    public async Task SendCurrentClipboardAsync()
+        => await SendClipboardAsync(manualOverride: true).ConfigureAwait(true);
+
+    private async Task SendClipboardAsync(bool manualOverride)
     {
-        if (IsPaused || IsManualMode)
+        if (IsPaused || (IsManualMode && !manualOverride))
         {
             return;
         }
 
         var text = clipboard.GetText();
-        if (string.IsNullOrEmpty(text) || text == _lastObserved)
+        if (string.IsNullOrEmpty(text) || (!manualOverride && text == _lastObserved))
         {
             return;
         }

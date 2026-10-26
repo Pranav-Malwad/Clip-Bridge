@@ -20,6 +20,9 @@ class TransientClipboardVault(
         return item.first.takeIf { clock() <= item.second }
     }
 
+    @Synchronized fun discard(token: String) { values.remove(token) }
+    @Synchronized fun clear() { values.clear() }
+
     private fun purge() {
         val now = clock()
         values.entries.removeAll { now > it.value.second }

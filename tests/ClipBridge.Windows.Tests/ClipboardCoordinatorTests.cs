@@ -66,6 +66,19 @@ public sealed class ClipboardCoordinatorTests
         Assert.Equal("local", clipboard.Text);
     }
 
+    [Fact]
+    public async Task ManualModeSendsOnlyAfterDeliberateAction()
+    {
+        var clipboard = new FakeClipboard("deliberate");
+        var sent = new List<string>();
+        var coordinator = new ClipboardCoordinator(clipboard, text => { sent.Add(text); return Task.CompletedTask; }) { IsManualMode = true };
+
+        await coordinator.HandleLocalClipboardChangedAsync();
+        await coordinator.SendCurrentClipboardAsync();
+
+        Assert.Equal(["deliberate"], sent);
+    }
+
     private sealed class FakeClipboard(string? text) : IClipboardService
     {
         public string? Text { get; set; } = text;

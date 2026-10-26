@@ -24,4 +24,11 @@ class TransientClipboardVaultTest {
 
         assertNull(vault.take(token))
     }
+
+    @Test fun discardRemovesValueWithoutAnotherPut() {
+        val vault = TransientClipboardVault()
+        val token = vault.put("private")
+        vault.discard(token)
+        assertNull(vault.take(token))
+    }
 }

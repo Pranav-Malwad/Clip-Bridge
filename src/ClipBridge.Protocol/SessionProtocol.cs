@@ -90,7 +90,7 @@ public static class SessionProtocol
             ownKey.PublicKey.ExportSubjectPublicKeyInfo().AsSpan().SequenceEqual(Convert.FromBase64String(clientHello.PublicKey))
                 ? serverHello.PublicKey : clientHello.PublicKey);
         peer.ImportSubjectPublicKeyInfo(peerBytes, out _);
-        var shared = ownKey.DeriveKeyMaterial(peer.PublicKey);
+        var shared = ownKey.DeriveRawSecretAgreement(peer.PublicKey);
         var salt = SHA256.HashData(Encoding.UTF8.GetBytes($"{clientHello.PairingId}|{clientHello.Challenge}|{serverHello.Challenge}"));
         var output = HKDF.DeriveKey(HashAlgorithmName.SHA256, shared, 64, salt, "ClipBridge/session/v2"u8.ToArray());
         CryptographicOperations.ZeroMemory(shared);

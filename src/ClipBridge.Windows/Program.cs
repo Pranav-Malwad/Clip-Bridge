@@ -13,6 +13,7 @@ internal static class Program
         }
         ApplicationConfiguration.Initialize();
         using var form = new MainForm();
+        _ = form.Handle;
         instance.StartListening(() => form.BeginInvoke(form.RestoreWindow));
         Application.Run(form);
     }

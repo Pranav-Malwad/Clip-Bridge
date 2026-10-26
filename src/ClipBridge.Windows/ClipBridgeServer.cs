@@ -127,8 +127,27 @@ public sealed class ClipBridgeServer(byte[] secret, string pairingId, int port) 
         var handshake = SessionProtocol.CreateServerHello(clientHello, secret, serverKey);
         var helloBytes = Encoding.UTF8.GetBytes(SessionProtocol.Serialize(handshake.Hello));
         await socket.SendAsync(helloBytes, WebSocketMessageType.Text, true, context.RequestAborted).ConfigureAwait(false);
-        var connection = new SessionConnection(socket, handshake.Keys);
         var processor = new InboundMessageProcessor(handshake.Keys.AndroidToWindows);
+        string? finishedJson;
+        try
+        {
+            using var finishedDeadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+            finishedDeadline.CancelAfter(TimeSpan.FromSeconds(5));
+            finishedJson = await ReceiveTextAsync(socket, buffer, finishedDeadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await SafeCloseAsync(socket, WebSocketCloseStatus.PolicyViolation, "Handshake timed out.").ConfigureAwait(false);
+            return;
+        }
+        var finished = finishedJson is null ? DecryptResult.Failed(DecryptFailure.InvalidEnvelope) : processor.Process(finishedJson);
+        if (!finished.IsSuccess || finished.Text != "")
+        {
+            RememberAuthenticationFailure(remoteAddress, DateTimeOffset.UtcNow);
+            await SafeCloseAsync(socket, WebSocketCloseStatus.PolicyViolation, "Client proof failed.").ConfigureAwait(false);
+            return;
+        }
+        var connection = new SessionConnection(socket, handshake.Keys);
 
         var previous = Interlocked.Exchange(ref _client, connection);
         if (previous?.Socket is { State: WebSocketState.Open })
