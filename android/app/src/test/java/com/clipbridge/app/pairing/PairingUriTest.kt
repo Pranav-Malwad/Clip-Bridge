@@ -4,12 +4,14 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
 import org.junit.Test
+import java.time.Instant
 
 class PairingUriTest {
     @Test
     fun parsesValidPairingUri() {
         val secret = ByteArray(32) { it.toByte() }
-        val value = PairingUri.format(PairingInfo("My Laptop", "192.168.1.20", 24891, secret))
+        val expires = Instant.ofEpochSecond(1_800_000_120)
+        val value = PairingUri.format(PairingInfo("My Laptop", "192.168.1.20", 24891, secret, "device-123", expires))
 
         val parsed = PairingUri.parse(value)
 
@@ -17,6 +19,8 @@ class PairingUriTest {
         assertEquals("192.168.1.20", parsed.host)
         assertEquals(24891, parsed.port)
         assertArrayEquals(secret, parsed.secret)
+        assertEquals("device-123", parsed.pairingId)
+        assertEquals(expires, parsed.expiresAt)
     }
 
     @Test
