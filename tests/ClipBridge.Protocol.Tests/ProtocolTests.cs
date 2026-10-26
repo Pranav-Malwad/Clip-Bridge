@@ -81,6 +81,27 @@ public sealed class ProtocolTests
         Assert.Equal(pairing.Secret, parsed.Secret);
     }
 
+    [Fact]
+    public void DecryptsSharedCrossPlatformFixture()
+    {
+        var envelope = new ClipboardEnvelope(
+            1,
+            "00112233445566778899aabbccddeeff",
+            1_800_000_000,
+            TransferDirection.WindowsToAndroid,
+            "AAECAwQFBgcICQoL",
+            "LmyifreKsjtv3QQ=",
+            "2fzIjtMRKPw1GJs5h9T1MA==");
+
+        var result = ClipboardProtocol.Decrypt(
+            envelope,
+            Secret,
+            DateTimeOffset.FromUnixTimeSeconds(1_800_000_000),
+            new ReplayCache());
+
+        Assert.Equal("interop ✓", result.Text);
+    }
+
     [Theory]
     [InlineData("https://example.com")]
     [InlineData("clipbridge://pair?host=x&port=0&secret=nope")]

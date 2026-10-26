@@ -1,0 +1,178 @@
+package com.clipbridge.app.sync
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import androidx.core.app.NotificationCompat
+import com.clipbridge.app.MainActivity
+import com.clipbridge.app.pairing.PairingInfo
+import com.clipbridge.app.pairing.PairingStore
+import com.clipbridge.app.protocol.ClipboardProtocol
+import com.clipbridge.app.protocol.Direction
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+
+class SyncService : Service() {
+    private val handler = Handler(Looper.getMainLooper())
+    private val pending = ConcurrentLinkedQueue<String>()
+    private val client = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
+    private var socket: WebSocket? = null
+    private var pairing: PairingInfo? = null
+    private var processor: InboundMessageProcessor? = null
+    private var running = false
+    private var reconnectDelay = 1_000L
+
+    override fun onCreate() {
+        super.onCreate()
+        createChannels()
+        startForeground(ONGOING_NOTIFICATION_ID, ongoingNotification("Starting…"))
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_STOP -> {
+                running = false
+                SyncState.update(ConnectionStatus.PAUSED, "Clipboard sync is paused.")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_SEND_TEXT -> intent.getStringExtra(EXTRA_TEXT)?.let(pending::add)
+        }
+
+        pairing = PairingStore(this).load()
+        if (pairing == null) {
+            SyncState.update(ConnectionStatus.UNPAIRED, "Pair this phone before sending text.")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        running = true
+        if (socket == null) connect()
+        return START_STICKY
+    }
+
+    private fun connect() {
+        val paired = pairing ?: return
+        SyncState.update(ConnectionStatus.CONNECTING, "Connecting to ${paired.name}…")
+        updateOngoing("Connecting to ${paired.name}…")
+        processor = InboundMessageProcessor(paired.secret)
+        val request = Request.Builder().url("ws://${paired.host}:${paired.port}/clipbridge").build()
+        socket = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                reconnectDelay = 1_000L
+                SyncState.update(ConnectionStatus.CONNECTED, "Connected to ${paired.name}")
+                updateOngoing("Connected to ${paired.name}")
+                while (true) {
+                    val text = pending.poll() ?: break
+                    sendNow(webSocket, text, paired)
+                }
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val result = processor?.process(text) ?: return
+                result.text?.let(::deliverIncoming)
+            }
+
+            override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+                socket = null
+                SyncState.update(ConnectionStatus.ERROR, "Cannot reach ${paired.name}; retrying.")
+                updateOngoing("Disconnected; retrying…")
+                scheduleReconnect()
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                socket = null
+                if (running) scheduleReconnect()
+            }
+        })
+    }
+
+    private fun sendNow(webSocket: WebSocket, text: String, paired: PairingInfo) {
+        val envelope = ClipboardProtocol.encrypt(text, Direction.ANDROID_TO_WINDOWS, paired.secret)
+        if (!webSocket.send(ClipboardProtocol.serialize(envelope))) pending.add(text)
+    }
+
+    private fun scheduleReconnect() {
+        if (!running) return
+        handler.postDelayed({ if (running && socket == null) connect() }, reconnectDelay)
+        reconnectDelay = (reconnectDelay * 2).coerceAtMost(30_000L)
+    }
+
+    private fun deliverIncoming(text: String) {
+        handler.post {
+            ClipboardWriter.write(this, text)
+            val copyIntent = Intent(this, CopyReceiver::class.java).putExtra(CopyReceiver.EXTRA_TEXT, text)
+            val copyAction = PendingIntent.getBroadcast(
+                this,
+                text.hashCode(),
+                copyIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notification = NotificationCompat.Builder(this, TRANSFER_CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_menu_set_as)
+                .setContentTitle("Text received from Windows")
+                .setContentText("Ready to paste. Tap Copy if Android cleared it.")
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setAutoCancel(true)
+                .addAction(0, "Copy", copyAction)
+                .build()
+            getSystemService(NotificationManager::class.java).notify(TRANSFER_NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun createChannels() {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(ONGOING_CHANNEL, "Clipboard connection", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel(TRANSFER_CHANNEL, "Clipboard transfers", NotificationManager.IMPORTANCE_DEFAULT))
+    }
+
+    private fun ongoingNotification(detail: String): android.app.Notification {
+        val openIntent = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Builder(this, ONGOING_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle("ClipBridge is active")
+            .setContentText(detail)
+            .setContentIntent(openIntent)
+            .setOngoing(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .build()
+    }
+
+    private fun updateOngoing(detail: String) {
+        getSystemService(NotificationManager::class.java).notify(ONGOING_NOTIFICATION_ID, ongoingNotification(detail))
+    }
+
+    override fun onDestroy() {
+        running = false
+        handler.removeCallbacksAndMessages(null)
+        socket?.cancel()
+        socket = null
+        client.dispatcher.executorService.shutdown()
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    companion object {
+        const val ACTION_START = "com.clipbridge.app.action.START"
+        const val ACTION_STOP = "com.clipbridge.app.action.STOP"
+        const val ACTION_SEND_TEXT = "com.clipbridge.app.action.SEND_TEXT"
+        const val EXTRA_TEXT = "com.clipbridge.app.extra.TEXT"
+        private const val ONGOING_CHANNEL = "clipbridge_connection"
+        private const val TRANSFER_CHANNEL = "clipbridge_transfers"
+        private const val ONGOING_NOTIFICATION_ID = 1001
+        private const val TRANSFER_NOTIFICATION_ID = 1002
+    }
+}

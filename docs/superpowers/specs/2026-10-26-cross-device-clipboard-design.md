@@ -23,9 +23,9 @@ Build a private, local-first clipboard bridge between one Windows laptop and one
 
 ## Architecture
 
-The Windows app is the local session host. It advertises a `_clipbridge._tcp` service through mDNS, displays a QR pairing payload, listens for authenticated WebSocket connections, watches the Windows clipboard, and writes phone-originated text to it. The Android app discovers the host, scans the QR code, stores the paired identity in Android Keystore-backed preferences, and maintains a foreground connection while syncing is enabled.
+The Windows app is the local session host. It displays a QR pairing payload containing its LAN address, listens for authenticated WebSocket connections, watches the Windows clipboard, and writes phone-originated text to it. The Android app scans the QR code (or accepts the same URI manually), stores the paired identity in Android Keystore-backed preferences, and maintains a foreground connection while syncing is enabled.
 
-Pairing uses an ephemeral code carried by the QR payload. The devices exchange public identity material and derive a per-device shared secret. Application messages use an authenticated envelope containing protocol version, message ID, timestamp, direction, content type, and ciphertext. TLS protects transport; message authentication provides protocol-level identity and replay protection.
+Pairing uses a randomly generated 256-bit secret carried by the QR payload. Application messages use an AES-256-GCM authenticated envelope containing protocol version, message ID, timestamp, direction, nonce, ciphertext, and authentication tag. Message-level encryption provides confidentiality, identity possession, tamper detection, and replay protection without requiring either platform to bypass trust checks for a locally generated TLS certificate.
 
 The Android share receiver accepts only shared `text/plain` content and sends it to the paired Windows session. Incoming Windows text is written to the Android clipboard when the OS permits; the app always posts a notification with a **Copy** action so delivery remains usable when background clipboard access is restricted.
 

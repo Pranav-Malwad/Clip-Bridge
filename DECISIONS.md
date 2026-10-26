@@ -23,9 +23,9 @@ This file records product and engineering decisions made for the initial ClipBri
 ## Networking and Pairing
 
 - The Windows app hosts the local session; Android connects to it.
-- mDNS advertises/discovers `_clipbridge._tcp`; QR pairing remains authoritative and includes a manual-address fallback.
+- QR pairing carries the Windows LAN address and is authoritative; manual pairing accepts the same URI. mDNS was omitted from the single-host MVP because it adds multicast/firewall failure modes without improving a completed QR pairing.
 - Pairing is account-free and initiated by scanning a QR code displayed by Windows.
-- Transport uses an authenticated WebSocket connection on the LAN.
+- Transport uses a LAN WebSocket carrying AES-256-GCM authenticated application frames. Application encryption avoids unsafe trust bypasses for a locally generated TLS certificate; LAN observers can still see addresses, timing, and frame sizes.
 - Device credentials are stored with Windows DPAPI and Android Keystore-backed storage.
 - Re-pairing revokes the previously paired phone.
 

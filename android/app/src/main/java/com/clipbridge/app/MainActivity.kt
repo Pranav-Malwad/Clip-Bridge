@@ -1,0 +1,151 @@
+package com.clipbridge.app
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.clipbridge.app.pairing.PairingStore
+import com.clipbridge.app.pairing.PairingUri
+import com.clipbridge.app.sync.ConnectionStatus
+import com.clipbridge.app.sync.SyncService
+import com.clipbridge.app.sync.SyncState
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+
+class MainActivity : ComponentActivity() {
+    private lateinit var store: PairingStore
+    private val scanner = registerForActivityResult(ScanContract()) { result -> result.contents?.let(::pair) }
+    private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        store = PairingStore(this)
+        requestNotificationPermission()
+        if (store.load() != null) startSync()
+        setContent {
+            MaterialTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF8FAFC)) {
+                    ClipBridgeScreen(
+                        pairedName = store.load()?.name,
+                        onScan = {
+                            scanner.launch(
+                                ScanOptions()
+                                    .setDesiredBarcodeFormats("QR_CODE")
+                                    .setPrompt("Scan the ClipBridge code on Windows")
+                                    .setBeepEnabled(false)
+                            )
+                        },
+                        onManualPair = ::pair,
+                        onStart = ::startSync,
+                        onStop = ::stopSync,
+                        onForget = {
+                            stopSync()
+                            store.clear()
+                            recreate()
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private fun pair(value: String) {
+        runCatching { PairingUri.parse(value) }
+            .onSuccess {
+                store.save(it)
+                startSync()
+                recreate()
+            }
+            .onFailure { SyncState.update(ConnectionStatus.ERROR, "That pairing code is invalid.") }
+    }
+
+    private fun startSync() {
+        ContextCompat.startForegroundService(this, Intent(this, SyncService::class.java).setAction(SyncService.ACTION_START))
+    }
+
+    private fun stopSync() {
+        startService(Intent(this, SyncService::class.java).setAction(SyncService.ACTION_STOP))
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}
+
+@Composable
+private fun ClipBridgeScreen(
+    pairedName: String?,
+    onScan: () -> Unit,
+    onManualPair: (String) -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onForget: () -> Unit
+) {
+    val sync by SyncState.status.collectAsState()
+    var manual by remember { mutableStateOf("") }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("ClipBridge", style = MaterialTheme.typography.headlineLarge)
+        Spacer(Modifier.height(8.dp))
+        Text(pairedName?.let { "Paired with $it" } ?: "Not paired", style = MaterialTheme.typography.titleMedium)
+        Text(sync.detail, modifier = Modifier.padding(top = 4.dp, bottom = 24.dp))
+
+        if (pairedName == null) {
+            Button(onClick = onScan, modifier = Modifier.fillMaxWidth()) { Text("Scan Windows pairing code") }
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = manual,
+                onValueChange = { manual = it },
+                label = { Text("Or paste pairing link") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Button(onClick = { onManualPair(manual) }, enabled = manual.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+                Text("Pair")
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = onStart) { Text("Enable sync") }
+                OutlinedButton(onClick = onStop) { Text("Pause") }
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onClick = onForget) { Text("Forget this PC") }
+            Spacer(Modifier.height(24.dp))
+            Text("To send text: select it in any app, tap Share, then choose Send to PC.")
+        }
+    }
+}
