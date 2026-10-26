@@ -16,6 +16,8 @@ public sealed class MainForm : Form
     private readonly Button _privateMode = new() { Text = "Private for 10 minutes", AutoSize = true };
     private readonly CheckBox _manualMode = new() { Text = "Manual mode (do not send copies automatically)", AutoSize = true };
     private readonly Button _sendNow = new() { Text = "Send clipboard now", AutoSize = true, Visible = false };
+    private readonly TextBox _shortcutInput = new() { Width = 120, AccessibleName = "Manual send shortcut" };
+    private readonly Button _applyShortcut = new() { Text = "Apply shortcut", AutoSize = true };
     private readonly NotifyIcon _tray = new() { Text = "ClipBridge", Visible = true, Icon = SystemIcons.Application };
     private readonly System.Windows.Forms.Timer _clipboardTimer = new() { Interval = 400 };
     private readonly PairingStore _pairingStore;
@@ -49,6 +51,7 @@ public sealed class MainForm : Form
         };
         _coordinator.ContentBlocked += _ => BeginInvoke(() => SetStatus("Protected", "Sensitive text was not shared."));
         _manualMode.Checked = _privacy.ManualMode;
+        _shortcutInput.Text = _privacy.Shortcut;
 
         var layout = new FlowLayoutPanel
         {
@@ -69,6 +72,11 @@ public sealed class MainForm : Form
         layout.Controls.Add(buttons);
         layout.Controls.Add(_manualMode);
         layout.Controls.Add(_sendNow);
+        var shortcutRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+        shortcutRow.Controls.Add(new Label { Text = "Manual send shortcut", AutoSize = true, Margin = new Padding(0, 7, 8, 0) });
+        shortcutRow.Controls.Add(_shortcutInput);
+        shortcutRow.Controls.Add(_applyShortcut);
+        layout.Controls.Add(shortcutRow);
         Controls.Add(layout);
 
         _pause.Click += (_, _) => TogglePause();
@@ -76,6 +84,7 @@ public sealed class MainForm : Form
         _privateMode.Click += (_, _) => EnablePrivateMode();
         _manualMode.CheckedChanged += (_, _) => SetManualMode(_manualMode.Checked);
         _sendNow.Click += async (_, _) => await _coordinator.SendCurrentClipboardAsync();
+        _applyShortcut.Click += (_, _) => ApplyShortcut();
         _clipboardTimer.Tick += async (_, _) => await PollClipboardAsync();
         _tray.DoubleClick += (_, _) => RestoreWindow();
         _tray.ContextMenuStrip = BuildTrayMenu();
@@ -107,6 +116,55 @@ public sealed class MainForm : Form
         Show();
         WindowState = FormWindowState.Normal;
         Activate();
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        RegisterConfiguredShortcut(showError: true);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        UnregisterHotKey(Handle, ManualSendHotkeyId);
+        base.OnHandleDestroyed(e);
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        if (message.Msg == WmHotkey && message.WParam.ToInt32() == ManualSendHotkeyId && _coordinator.IsManualMode)
+        {
+            _ = SendClipboardFromShortcutAsync();
+        }
+        base.WndProc(ref message);
+    }
+
+    private async Task SendClipboardFromShortcutAsync()
+    {
+        await _coordinator.SendCurrentClipboardAsync();
+    }
+
+    private void ApplyShortcut()
+    {
+        if (!ShortcutGesture.TryParse(_shortcutInput.Text, out var gesture))
+        {
+            SetStatus("Invalid shortcut", "Use Ctrl+Alt or Ctrl+Shift plus one letter, for example Ctrl+Alt+S.");
+            return;
+        }
+        _privacy = _privacy with { Shortcut = gesture.ToString() };
+        _privacyStore.Save(_privacy);
+        _shortcutInput.Text = _privacy.Shortcut;
+        RegisterConfiguredShortcut(showError: true);
+    }
+
+    private void RegisterConfiguredShortcut(bool showError)
+    {
+        if (!IsHandleCreated || !ShortcutGesture.TryParse(_privacy.Shortcut, out var gesture)) return;
+        UnregisterHotKey(Handle, ManualSendHotkeyId);
+        if (!RegisterHotKey(Handle, ManualSendHotkeyId, (uint)gesture.Modifiers, (uint)gesture.Key) && showError)
+            SetStatus("Shortcut unavailable", $"{gesture} is already used by another app. Choose a different shortcut.");
+        else if (showError)
+            SetStatus("Shortcut saved", $"In Manual mode, press {gesture} to send the current clipboard.");
     }
 
     private async Task StartServerAsync()
@@ -259,4 +317,13 @@ public sealed class MainForm : Form
             await _discovery.DisposeAsync();
         }
     }
+
+    private const int WmHotkey = 0x0312;
+    private const int ManualSendHotkeyId = 0x4342;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterHotKey(nint window, int id, uint modifiers, uint key);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnregisterHotKey(nint window, int id);
 }

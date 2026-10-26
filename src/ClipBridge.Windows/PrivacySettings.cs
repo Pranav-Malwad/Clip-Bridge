@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace ClipBridge.Windows;
 
-public sealed record PrivacySettings(bool ManualMode, bool Paused, DateTimeOffset? PauseUntil)
+public sealed record PrivacySettings(bool ManualMode, bool Paused, DateTimeOffset? PauseUntil, string Shortcut = "Ctrl+Alt+S")
 {
     public static PrivacySettings Default { get; } = new(false, false, null);
     public bool IsPaused(DateTimeOffset now) => Paused || (PauseUntil is not null && now < PauseUntil);

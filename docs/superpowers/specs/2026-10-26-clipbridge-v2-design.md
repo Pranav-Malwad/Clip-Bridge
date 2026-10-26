@@ -58,7 +58,7 @@ Smart Sync is the default. Windows copies are evaluated in memory before transfe
 - Block copies whose foreground process is on the built-in deny list (common password managers) or the user's exclusion list.
 - Show only a generic local status such as `Sensitive text was not shared`; never show the blocked value.
 
-Manual Mode disables automatic Windows clipboard sending; a deliberate `Send clipboard now` action remains available. Private Mode pauses all transfer for 10 minutes, one hour, or until resumed. Timed pauses resume automatically and persist safely across restarts. Detection can produce false positives and is documented as defense in depth.
+Manual Mode disables automatic Windows clipboard sending; a deliberate `Send clipboard now` action and configurable global shortcut remain available. The default shortcut is Ctrl+Alt+S. Private Mode pauses all transfer for 10 minutes or until resumed. Timed pauses resume automatically and persist safely across restarts. Detection can produce false positives and is documented as defense in depth.
 
 Received Android text is kept in a short-lived in-process vault for the notification Copy action. The `PendingIntent` contains only an opaque identifier, and entries expire after five minutes. Clipboard content, pairing secrets, and session keys are never logged or placed in analytics/crash metadata.
 

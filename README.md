@@ -43,7 +43,7 @@ Use **Pair a new phone** on Windows to revoke the old pairing secret. Use **Forg
 
 - **Smart Sync** is the default. Likely secrets and copies from common password managers are blocked locally with generic feedback.
 - **Private Mode** pauses transfers for ten minutes and resumes automatically.
-- **Manual mode** disables automatic Windows clipboard sharing.
+- **Manual mode** disables automatic Windows clipboard sharing. Press the configurable global shortcut (default **Ctrl+Alt+S**) or click **Send clipboard now** to deliberately send the current clipboard.
 
 Sensitive detection is defense in depth, not a replacement for a password manager. Read [`PRIVACY.md`](PRIVACY.md) and [`SECURITY.md`](SECURITY.md) before distributing ClipBridge.
 
