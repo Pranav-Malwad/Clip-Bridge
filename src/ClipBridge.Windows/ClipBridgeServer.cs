@@ -9,12 +9,11 @@ using Microsoft.Extensions.Hosting;
 
 namespace ClipBridge.Windows;
 
-public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
+public sealed class ClipBridgeServer(byte[] secret, string pairingId, int port) : IAsyncDisposable
 {
     private readonly SemaphoreSlim _sendGate = new(1, 1);
-    private readonly InboundMessageProcessor _processor = new(secret);
     private WebApplication? _application;
-    private WebSocket? _client;
+    private SessionConnection? _client;
 
     public event Action<string>? TextReceived;
     public event Action<bool>? ConnectionChanged;
@@ -33,13 +32,14 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
 
     public async Task SendTextAsync(string text, CancellationToken cancellationToken = default)
     {
-        var socket = _client;
+        var connection = _client;
+        var socket = connection?.Socket;
         if (socket?.State != WebSocketState.Open)
         {
             return;
         }
 
-        var envelope = ClipboardProtocol.Encrypt(text, TransferDirection.WindowsToAndroid, secret, DateTimeOffset.UtcNow);
+        var envelope = ClipboardProtocol.Encrypt(text, TransferDirection.WindowsToAndroid, connection!.Keys.WindowsToAndroid, DateTimeOffset.UtcNow);
         var bytes = Encoding.UTF8.GetBytes(ClipboardProtocol.Serialize(envelope));
         await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -52,7 +52,7 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
                 }
                 catch (Exception error) when (error is WebSocketException or ObjectDisposedException)
                 {
-                    if (Interlocked.CompareExchange(ref _client, null, socket) == socket)
+                    if (Interlocked.CompareExchange(ref _client, null, connection) == connection)
                     {
                         ConnectionChanged?.Invoke(false);
                     }
@@ -78,7 +78,9 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
         string? firstMessage;
         try
         {
-            firstMessage = await ReceiveTextAsync(socket, buffer, context.RequestAborted).ConfigureAwait(false);
+            using var authenticationDeadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+            authenticationDeadline.CancelAfter(TimeSpan.FromSeconds(5));
+            firstMessage = await ReceiveTextAsync(socket, buffer, authenticationDeadline.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
@@ -93,25 +95,28 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
             return;
         }
 
-        var authentication = _processor.Process(firstMessage);
-        if (!authentication.IsSuccess)
+        var clientHello = SessionProtocol.Deserialize<ClientHello>(firstMessage);
+        if (clientHello is null || clientHello.PairingId != pairingId || !SessionProtocol.VerifyClientHello(clientHello, secret))
         {
             await SafeCloseAsync(socket, WebSocketCloseStatus.PolicyViolation, "Authentication failed.").ConfigureAwait(false);
             return;
         }
 
-        var previous = Interlocked.Exchange(ref _client, socket);
-        if (previous is { State: WebSocketState.Open })
+        using var serverKey = SessionProtocol.CreateEphemeralKey();
+        var handshake = SessionProtocol.CreateServerHello(clientHello, secret, serverKey);
+        var helloBytes = Encoding.UTF8.GetBytes(SessionProtocol.Serialize(handshake.Hello));
+        await socket.SendAsync(helloBytes, WebSocketMessageType.Text, true, context.RequestAborted).ConfigureAwait(false);
+        var connection = new SessionConnection(socket, handshake.Keys);
+        var processor = new InboundMessageProcessor(handshake.Keys.AndroidToWindows);
+
+        var previous = Interlocked.Exchange(ref _client, connection);
+        if (previous?.Socket is { State: WebSocketState.Open })
         {
-            await SafeCloseAsync(previous, WebSocketCloseStatus.PolicyViolation, "A newer paired device connected.")
+            await SafeCloseAsync(previous.Socket, WebSocketCloseStatus.PolicyViolation, "A newer paired device connected.")
                 .ConfigureAwait(false);
         }
 
         ConnectionChanged?.Invoke(true);
-        if (!string.IsNullOrEmpty(authentication.Text))
-        {
-            TextReceived?.Invoke(authentication.Text);
-        }
         try
         {
             while (socket.State == WebSocketState.Open)
@@ -122,7 +127,7 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
                     return;
                 }
 
-                var decoded = _processor.Process(json);
+                var decoded = processor.Process(json);
                 if (decoded.IsSuccess && decoded.Text is not null)
                 {
                     TextReceived?.Invoke(decoded.Text);
@@ -137,7 +142,7 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
         }
         finally
         {
-            if (Interlocked.CompareExchange(ref _client, null, socket) == socket)
+            if (Interlocked.CompareExchange(ref _client, null, connection) == connection)
             {
                 ConnectionChanged?.Invoke(false);
             }
@@ -187,10 +192,10 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        var socket = Interlocked.Exchange(ref _client, null);
-        if (socket is { State: WebSocketState.Open })
+        var connection = Interlocked.Exchange(ref _client, null);
+        if (connection?.Socket is { State: WebSocketState.Open })
         {
-            await SafeCloseAsync(socket, WebSocketCloseStatus.NormalClosure, "ClipBridge is closing.").ConfigureAwait(false);
+            await SafeCloseAsync(connection.Socket, WebSocketCloseStatus.NormalClosure, "ClipBridge is closing.").ConfigureAwait(false);
         }
 
         if (_application is not null)
@@ -201,4 +206,6 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
 
         _sendGate.Dispose();
     }
+
+    private sealed record SessionConnection(WebSocket Socket, SessionKeys Keys);
 }

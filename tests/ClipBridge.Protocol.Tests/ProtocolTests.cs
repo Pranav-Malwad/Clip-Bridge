@@ -70,7 +70,8 @@ public sealed class ProtocolTests
     [Fact]
     public void PairingUriRoundTripsIpv4HostAndSecret()
     {
-        var pairing = new PairingInfo("Laptop", "192.168.1.20", 24891, Secret);
+        var expires = DateTimeOffset.FromUnixTimeSeconds(1_800_000_120);
+        var pairing = new PairingInfo("Laptop", "192.168.1.20", 24891, Secret, "device-123", expires);
         var encoded = PairingUri.Format(pairing);
 
         var parsed = PairingUri.Parse(encoded);
@@ -79,6 +80,46 @@ public sealed class ProtocolTests
         Assert.Equal(pairing.Host, parsed.Host);
         Assert.Equal(pairing.Port, parsed.Port);
         Assert.Equal(pairing.Secret, parsed.Secret);
+        Assert.Equal(pairing.PairingId, parsed.PairingId);
+        Assert.Equal(pairing.ExpiresAt, parsed.ExpiresAt);
+    }
+
+    [Fact]
+    public void PairingInvitationExpiresAfterTwoMinutes()
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        var pairing = new PairingInfo("Laptop", "192.168.1.20", 24891, Secret, "device-123", now.AddMinutes(2));
+
+        Assert.True(pairing.IsInvitationValid(now.AddSeconds(119)));
+        Assert.False(pairing.IsInvitationValid(now.AddSeconds(121)));
+    }
+
+    [Fact]
+    public void AuthenticatedEphemeralHandshakeDerivesMatchingDirectionalKeys()
+    {
+        using var client = SessionProtocol.CreateEphemeralKey();
+        using var server = SessionProtocol.CreateEphemeralKey();
+        var clientHello = SessionProtocol.CreateClientHello(
+            "device-123", Secret, client, Convert.FromHexString("000102030405060708090A0B0C0D0E0F"));
+
+        Assert.True(SessionProtocol.VerifyClientHello(clientHello, Secret));
+        var serverResult = SessionProtocol.CreateServerHello(clientHello, Secret, server,
+            Convert.FromHexString("101112131415161718191A1B1C1D1E1F"));
+        var clientKeys = SessionProtocol.CompleteClientHandshake(clientHello, serverResult.Hello, Secret, client);
+
+        Assert.True(clientKeys.IsSuccess);
+        Assert.Equal(serverResult.Keys.WindowsToAndroid, clientKeys.Keys!.WindowsToAndroid);
+        Assert.Equal(serverResult.Keys.AndroidToWindows, clientKeys.Keys.AndroidToWindows);
+        Assert.NotEqual(serverResult.Keys.WindowsToAndroid, serverResult.Keys.AndroidToWindows);
+    }
+
+    [Fact]
+    public void ModifiedClientHelloIsRejected()
+    {
+        using var client = SessionProtocol.CreateEphemeralKey();
+        var hello = SessionProtocol.CreateClientHello("device-123", Secret, client, new byte[16]);
+
+        Assert.False(SessionProtocol.VerifyClientHello(hello with { PairingId = "attacker" }, Secret));
     }
 
     [Fact]

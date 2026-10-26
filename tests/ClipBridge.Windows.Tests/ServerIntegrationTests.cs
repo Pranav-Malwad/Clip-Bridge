@@ -15,7 +15,8 @@ public sealed class ServerIntegrationTests
     {
         var secret = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
         var port = FindFreePort();
-        await using var server = new ClipBridgeServer(secret, port);
+        var pairingId = PairingIdentity.FromSecret(secret);
+        await using var server = new ClipBridgeServer(secret, pairingId, port);
         var receivedByWindows = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         server.TextReceived += text => receivedByWindows.TrySetResult(text);
         await server.StartAsync(TestContext.Current.CancellationToken);
@@ -23,12 +24,12 @@ public sealed class ServerIntegrationTests
         using var client = new ClientWebSocket();
         await client.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/clipbridge"), TestContext.Current.CancellationToken);
 
-        await AuthenticateAsync(client, secret);
+        var keys = await AuthenticateAsync(client, secret, pairingId);
 
         var toWindows = ClipboardProtocol.Encrypt(
             "phone to laptop",
             TransferDirection.AndroidToWindows,
-            secret,
+            keys.AndroidToWindows,
             DateTimeOffset.UtcNow);
         await client.SendAsync(
             Encoding.UTF8.GetBytes(ClipboardProtocol.Serialize(toWindows)),
@@ -45,7 +46,7 @@ public sealed class ServerIntegrationTests
         var response = await client.ReceiveAsync(buffer, TestContext.Current.CancellationToken);
         var envelope = ClipboardProtocol.Deserialize(Encoding.UTF8.GetString(buffer, 0, response.Count));
         Assert.NotNull(envelope);
-        var decoded = ClipboardProtocol.Decrypt(envelope, secret, DateTimeOffset.UtcNow, new ReplayCache());
+        var decoded = ClipboardProtocol.Decrypt(envelope, keys.WindowsToAndroid, DateTimeOffset.UtcNow, new ReplayCache());
         Assert.Equal("laptop to phone", decoded.Text);
     }
 
@@ -54,11 +55,12 @@ public sealed class ServerIntegrationTests
     {
         var secret = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
         var port = FindFreePort();
-        await using var server = new ClipBridgeServer(secret, port);
+        var pairingId = PairingIdentity.FromSecret(secret);
+        await using var server = new ClipBridgeServer(secret, pairingId, port);
         await server.StartAsync(TestContext.Current.CancellationToken);
         using var paired = new ClientWebSocket();
         await paired.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/clipbridge"), TestContext.Current.CancellationToken);
-        await AuthenticateAsync(paired, secret);
+        var keys = await AuthenticateAsync(paired, secret, pairingId);
 
         using var attacker = new ClientWebSocket();
         await attacker.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/clipbridge"), TestContext.Current.CancellationToken);
@@ -68,17 +70,25 @@ public sealed class ServerIntegrationTests
         var response = await paired.ReceiveAsync(buffer, TestContext.Current.CancellationToken);
         var envelope = ClipboardProtocol.Deserialize(Encoding.UTF8.GetString(buffer, 0, response.Count));
         Assert.NotNull(envelope);
-        Assert.Equal("still paired", ClipboardProtocol.Decrypt(envelope, secret, DateTimeOffset.UtcNow, new ReplayCache()).Text);
+        Assert.Equal("still paired", ClipboardProtocol.Decrypt(envelope, keys.WindowsToAndroid, DateTimeOffset.UtcNow, new ReplayCache()).Text);
     }
 
-    private static Task AuthenticateAsync(ClientWebSocket client, byte[] secret)
+    private static async Task<SessionKeys> AuthenticateAsync(ClientWebSocket client, byte[] secret, string pairingId)
     {
-        var hello = ClipboardProtocol.Encrypt("", TransferDirection.AndroidToWindows, secret, DateTimeOffset.UtcNow);
-        return client.SendAsync(
-            Encoding.UTF8.GetBytes(ClipboardProtocol.Serialize(hello)),
+        using var key = SessionProtocol.CreateEphemeralKey();
+        var hello = SessionProtocol.CreateClientHello(pairingId, secret, key);
+        await client.SendAsync(
+            Encoding.UTF8.GetBytes(SessionProtocol.Serialize(hello)),
             WebSocketMessageType.Text,
             true,
             TestContext.Current.CancellationToken);
+        var buffer = new byte[4096];
+        var response = await client.ReceiveAsync(buffer, TestContext.Current.CancellationToken);
+        var serverHello = SessionProtocol.Deserialize<ServerHello>(Encoding.UTF8.GetString(buffer, 0, response.Count));
+        Assert.NotNull(serverHello);
+        var result = SessionProtocol.CompleteClientHandshake(hello, serverHello, secret, key);
+        Assert.True(result.IsSuccess);
+        return result.Keys!;
     }
 
     private static int FindFreePort()

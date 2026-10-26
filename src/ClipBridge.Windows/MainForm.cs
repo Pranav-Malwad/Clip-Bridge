@@ -92,7 +92,7 @@ public sealed class MainForm : Form
     {
         try
         {
-            _server = new ClipBridgeServer(_secret, Port);
+            _server = new ClipBridgeServer(_secret, PairingIdentity.FromSecret(_secret), Port);
             _server.TextReceived += text => BeginInvoke(() =>
             {
                 if (_coordinator.ApplyRemoteText(text))
@@ -156,7 +156,9 @@ public sealed class MainForm : Form
 
     private void RenderPairingCode()
     {
-        var pairingUri = PairingUri.Format(new PairingInfo(Environment.MachineName, NetworkAddress.FindLanIpv4(), Port, _secret));
+        var pairingUri = PairingUri.Format(new PairingInfo(
+            Environment.MachineName, NetworkAddress.FindLanIpv4(), Port, _secret,
+            PairingIdentity.FromSecret(_secret), DateTimeOffset.UtcNow.AddMinutes(2)));
         using var data = QRCodeGenerator.GenerateQrCode(pairingUri, QRCodeGenerator.ECCLevel.Q);
         using var code = new QRCode(data);
         var old = _qr.Image;

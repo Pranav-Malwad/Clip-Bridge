@@ -13,7 +13,11 @@ import com.clipbridge.app.MainActivity
 import com.clipbridge.app.pairing.PairingInfo
 import com.clipbridge.app.pairing.PairingStore
 import com.clipbridge.app.protocol.ClipboardProtocol
+import com.clipbridge.app.protocol.ClientHello
 import com.clipbridge.app.protocol.Direction
+import com.clipbridge.app.protocol.SessionKeys
+import com.clipbridge.app.protocol.SessionProtocol
+import java.security.KeyPair
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -31,6 +35,9 @@ class SyncService : Service() {
     private var running = false
     private var connected = false
     private var reconnectDelay = 1_000L
+    private var pendingKey: KeyPair? = null
+    private var pendingHello: ClientHello? = null
+    private var sessionKeys: SessionKeys? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -76,20 +83,36 @@ class SyncService : Service() {
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 reconnectDelay = 1_000L
-                connected = true
-                SyncState.update(ConnectionStatus.CONNECTED, "Connected to ${paired.name}")
-                updateOngoing("Connected to ${paired.name}")
-                sendNow(webSocket, "", paired)
-                drainPending()
+                val key = SessionProtocol.createEphemeralKey()
+                val hello = SessionProtocol.createClientHello(paired.pairingId, paired.secret, key)
+                pendingKey = key
+                pendingHello = hello
+                webSocket.send(SessionProtocol.serialize(hello))
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!connected) {
+                    val key = pendingKey ?: return webSocket.cancel()
+                    val hello = pendingHello ?: return webSocket.cancel()
+                    val serverHello = SessionProtocol.parseServer(text) ?: return webSocket.cancel()
+                    val result = SessionProtocol.completeClientHandshake(hello, serverHello, paired.secret, key)
+                    sessionKeys = result.keys ?: return webSocket.cancel()
+                    processor = InboundMessageProcessor(sessionKeys!!.windowsToAndroid)
+                    pendingKey = null
+                    pendingHello = null
+                    connected = true
+                    SyncState.update(ConnectionStatus.CONNECTED, "Connected to ${paired.name}")
+                    updateOngoing("Connected to ${paired.name}")
+                    drainPending()
+                    return
+                }
                 val result = processor?.process(text) ?: return
                 result.text?.let(::deliverIncoming)
             }
 
             override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
                 connected = false
+                sessionKeys = null
                 socket = null
                 SyncState.update(ConnectionStatus.ERROR, "Cannot reach ${paired.name}; retrying.")
                 updateOngoing("Disconnected; retrying…")
@@ -103,6 +126,7 @@ class SyncService : Service() {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 connected = false
+                sessionKeys = null
                 socket = null
                 if (running) scheduleReconnect()
             }
@@ -116,7 +140,8 @@ class SyncService : Service() {
     }
 
     private fun sendNow(webSocket: WebSocket, text: String, paired: PairingInfo): Boolean {
-        val envelope = ClipboardProtocol.encrypt(text, Direction.ANDROID_TO_WINDOWS, paired.secret)
+        val key = sessionKeys?.androidToWindows ?: return false
+        val envelope = ClipboardProtocol.encrypt(text, Direction.ANDROID_TO_WINDOWS, key)
         return webSocket.send(ClipboardProtocol.serialize(envelope))
     }
 
@@ -175,6 +200,7 @@ class SyncService : Service() {
     override fun onDestroy() {
         running = false
         connected = false
+        sessionKeys = null
         handler.removeCallbacksAndMessages(null)
         socket?.cancel()
         socket = null

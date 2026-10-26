@@ -5,14 +5,23 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+import java.time.Instant
+import java.util.UUID
 
-data class PairingInfo(val name: String, val host: String, val port: Int, val secret: ByteArray)
+data class PairingInfo(
+    val name: String, val host: String, val port: Int, val secret: ByteArray,
+    val pairingId: String = UUID.randomUUID().toString().replace("-", ""),
+    val expiresAt: Instant = Instant.now().plusSeconds(120)
+) {
+    fun isInvitationValid(now: Instant = Instant.now()) = !now.isAfter(expiresAt)
+}
 
 object PairingUri {
     fun format(info: PairingInfo): String {
-        validate(info.host, info.port, info.secret)
+        validate(info.host, info.port, info.secret, info.pairingId)
         val secret = Base64.getUrlEncoder().withoutPadding().encodeToString(info.secret)
-        return "clipbridge://pair?host=${encode(info.host)}&port=${info.port}&secret=$secret&name=${encode(info.name)}"
+        return "clipbridge://pair?host=${encode(info.host)}&port=${info.port}&secret=$secret" +
+            "&id=${encode(info.pairingId)}&expires=${info.expiresAt.epochSecond}&name=${encode(info.name)}"
     }
 
     fun parse(value: String): PairingInfo {
@@ -29,12 +38,15 @@ object PairingUri {
         } catch (error: IllegalArgumentException) {
             throw IllegalArgumentException("Pairing secret is invalid.", error)
         }
-        validate(host, port, secret)
-        return PairingInfo(query["name"].takeUnless { it.isNullOrBlank() } ?: "Windows PC", host, port, secret)
+        val pairingId = query["id"] ?: throw IllegalArgumentException("Pairing identity is missing.")
+        val expires = query["expires"]?.toLongOrNull()?.let(Instant::ofEpochSecond)
+            ?: throw IllegalArgumentException("Pairing expiration is invalid.")
+        validate(host, port, secret, pairingId)
+        return PairingInfo(query["name"].takeUnless { it.isNullOrBlank() } ?: "Windows PC", host, port, secret, pairingId, expires)
     }
 
-    private fun validate(host: String, port: Int, secret: ByteArray) {
-        require(host.isNotBlank() && host.length <= 255 && port in 1..65535 && secret.size == 32) {
+    private fun validate(host: String, port: Int, secret: ByteArray, pairingId: String) {
+        require(host.isNotBlank() && host.length <= 255 && port in 1..65535 && secret.size == 32 && pairingId.isNotBlank() && pairingId.length <= 128) {
             "Pairing parameters are invalid."
         }
     }

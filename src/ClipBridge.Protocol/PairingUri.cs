@@ -2,16 +2,30 @@ using System.Globalization;
 
 namespace ClipBridge.Protocol;
 
-public sealed record PairingInfo(string Name, string Host, int Port, byte[] Secret);
+public sealed record PairingInfo(
+    string Name,
+    string Host,
+    int Port,
+    byte[] Secret,
+    string PairingId,
+    DateTimeOffset ExpiresAt)
+{
+    public PairingInfo(string name, string host, int port, byte[] secret)
+        : this(name, host, port, secret, Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow.AddMinutes(2)) { }
+
+    public bool IsInvitationValid(DateTimeOffset now) => now <= ExpiresAt;
+}
 
 public static class PairingUri
 {
     public static string Format(PairingInfo pairing)
     {
-        Validate(pairing.Host, pairing.Port, pairing.Secret);
+        Validate(pairing.Host, pairing.Port, pairing.Secret, pairing.PairingId);
         return $"clipbridge://pair?host={Uri.EscapeDataString(pairing.Host)}" +
                $"&port={pairing.Port.ToString(CultureInfo.InvariantCulture)}" +
                $"&secret={Base64UrlEncode(pairing.Secret)}" +
+               $"&id={Uri.EscapeDataString(pairing.PairingId)}" +
+               $"&expires={pairing.ExpiresAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}" +
                $"&name={Uri.EscapeDataString(pairing.Name)}";
     }
 
@@ -28,7 +42,10 @@ public static class PairingUri
         if (!query.TryGetValue("host", out var host) ||
             !query.TryGetValue("port", out var portText) ||
             !int.TryParse(portText, NumberStyles.None, CultureInfo.InvariantCulture, out var port) ||
-            !query.TryGetValue("secret", out var secretText))
+            !query.TryGetValue("secret", out var secretText) ||
+            !query.TryGetValue("id", out var pairingId) ||
+            !query.TryGetValue("expires", out var expiresText) ||
+            !long.TryParse(expiresText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var expiresSeconds))
         {
             throw new FormatException("Pairing URI is incomplete.");
         }
@@ -43,9 +60,12 @@ public static class PairingUri
             throw new FormatException("Pairing secret is invalid.");
         }
 
-        Validate(host, port, secret);
+        Validate(host, port, secret, pairingId);
         query.TryGetValue("name", out var name);
-        return new PairingInfo(string.IsNullOrWhiteSpace(name) ? "Windows PC" : name, host, port, secret);
+        DateTimeOffset expiresAt;
+        try { expiresAt = DateTimeOffset.FromUnixTimeSeconds(expiresSeconds); }
+        catch (ArgumentOutOfRangeException) { throw new FormatException("Pairing expiration is invalid."); }
+        return new PairingInfo(string.IsNullOrWhiteSpace(name) ? "Windows PC" : name, host, port, secret, pairingId, expiresAt);
     }
 
     private static Dictionary<string, string> ParseQuery(string query)
@@ -65,9 +85,10 @@ public static class PairingUri
         return result;
     }
 
-    private static void Validate(string host, int port, byte[] secret)
+    private static void Validate(string host, int port, byte[] secret, string pairingId)
     {
-        if (string.IsNullOrWhiteSpace(host) || host.Length > 255 || port is < 1 or > 65535 || secret.Length != 32)
+        if (string.IsNullOrWhiteSpace(host) || host.Length > 255 || port is < 1 or > 65535 ||
+            secret.Length != 32 || string.IsNullOrWhiteSpace(pairingId) || pairingId.Length > 128)
         {
             throw new FormatException("Pairing parameters are invalid.");
         }
