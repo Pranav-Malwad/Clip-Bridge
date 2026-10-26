@@ -2,6 +2,23 @@
 
 This file records product and engineering decisions made for the initial ClipBridge release.
 
+## V2: Seamless Trusted Devices
+
+- ClipBridge will use a **pair once, trust until revoked** model. Restarting either device, losing Wi-Fi, sleeping the laptop, or receiving a new LAN address must not require pairing again.
+- The selected architecture is a persistent OS-protected trust credential plus an authenticated ephemeral P-256 ECDH handshake for every connection. HKDF-SHA256 derives independent directional AES-256-GCM keys. P-256 is used instead of X25519 to retain Android API 29 support without adding a cryptographic provider.
+- The pairing QR is a two-minute, single-use invitation. It is hidden and invalidated after the first authenticated pairing; the trusted credential remains protected by DPAPI and Android Keystore-backed storage.
+- V1 pairings receive a one-time migration reset because the old record lacks invitation and device metadata. Future upgrades preserve trust.
+- Authenticated UDP discovery is added so Android can find the paired laptop after DHCP address changes. The saved address remains the fast first attempt and manual pairing remains a recovery path.
+- The Windows listener may bind local interfaces for resilience, but distribution creates a **Private-profile-only** firewall rule. Authentication has a five-second deadline, bounded concurrency, and per-address throttling.
+- **Smart Sync** is the default. It blocks likely secrets and copies from built-in/user-excluded applications in memory, shows only generic feedback, and never persists blocked content. Detection is explicitly defense in depth and may produce false positives.
+- **Manual Mode** and timed **Private Mode** are first-class controls. Pause state and expiry persist, but clipboard values do not.
+- Android notification actions carry an opaque, expiring identifier; plaintext clipboard content is retained only in a five-minute in-process vault and never embedded in a `PendingIntent`.
+- Windows enforces a single running process; a second launch activates the existing window. The distribution must create searchable Start Menu and optional startup shortcuts.
+- The interface is status-first, uses consistent `Connected`, `Reconnecting`, `Private Mode`, and `Action required` vocabulary, progressively discloses advanced controls, supports dark mode and large text, and uses Android touch targets of at least 48 dp.
+- No cloud relay, account system, analytics, clipboard history, or internet exposure is introduced. Clipboard contents, trust credentials, and session keys are never logged.
+- Public distribution requires owner-controlled Windows code-signing and Android release-signing credentials. Keys are never generated into or committed to the repository. Unsigned/debug packages remain visibly labeled and are not represented as production-secure releases.
+- Automatic updates are deferred until they can verify an HTTPS manifest and a pinned publisher signature; unsigned self-update behavior is prohibited.
+
 ## Product Scope
 
 - The product is named **ClipBridge**.
