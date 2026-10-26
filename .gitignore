@@ -1,0 +1,11 @@
+.idea/
+.gradle/
+.tools/
+.superpowers/
+.worktrees/
+**/bin/
+**/obj/
+**/build/
+*.user
+local.properties
+
