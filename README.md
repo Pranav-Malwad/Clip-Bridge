@@ -2,6 +2,8 @@
 
 ClipBridge privately moves copied text between one Windows laptop and one Android phone on the same local network.
 
+> **Project status:** public-source development release. The protocol and automated tests are available for review, but the project has not received an independent security audit. Repository builds are unsigned development artifacts unless a release explicitly says otherwise.
+
 ## What works
 
 - Copy text on Windows; it is encrypted, sent to Android, placed on the phone clipboard, and accompanied by a **Copy** notification fallback.
@@ -13,9 +15,11 @@ ClipBridge privately moves copied text between one Windows laptop and one Androi
 
 ## Install the development build
 
+Build artifacts are intentionally not committed to the repository. Build them locally using the instructions below. Only install binaries from a source and commit you trust.
+
 ### Windows
 
-1. Open [`dist/windows-x64`](dist/windows-x64).
+1. Build the project, then open `dist/windows-x64`.
 2. Run `ClipBridge.exe`.
 3. If Windows Firewall asks, allow access on **Private networks** only.
 4. Leave ClipBridge running in the notification area.
@@ -24,7 +28,7 @@ The development executable is self-contained and does not require a separate .NE
 
 ### Android
 
-1. Transfer [`dist/ClipBridge-Android-debug.apk`](dist/ClipBridge-Android-debug.apk) to the phone.
+1. Build the project, then transfer `dist/ClipBridge-Android-debug.apk` to the phone.
 2. Allow installation from the app used to open the APK, then install it.
 3. Open ClipBridge, grant camera and notification access, and scan the QR code on Windows.
 4. Keep both devices on the same Wi-Fi network. VPNs and guest networks can block local-device connections.
@@ -79,3 +83,9 @@ The script runs the complete test suite and creates the Windows self-contained o
 - `tests`: .NET protocol and Windows behavior tests.
 - [`DECISIONS.md`](DECISIONS.md): product and engineering decisions, including deliberately deferred scope.
 - `docs/superpowers`: approved design and implementation plan.
+
+## Contributing and security
+
+Contributions are welcome under the guidelines in [`CONTRIBUTING.md`](CONTRIBUTING.md). Report vulnerabilities privately using [`SECURITY.md`](SECURITY.md); never place clipboard contents, pairing invitations, credentials, or personal information in a public issue.
+
+ClipBridge is released under the [MIT License](LICENSE).

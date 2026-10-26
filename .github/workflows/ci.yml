@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    name: .NET tests and Windows build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet test ClipBridge.slnx --configuration Release --nologo
+
+      - name: Publish Windows development build
+        run: >-
+          dotnet publish src/ClipBridge.Windows/ClipBridge.Windows.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:DebugType=None
+          --output artifacts/windows-x64
+          --nologo
+
+  android:
+    name: Android tests and debug build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Test and assemble development APK
+        working-directory: android
+        run: bash ./gradlew testDebugUnitTest assembleDebug --no-daemon

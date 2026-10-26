@@ -1,0 +1,60 @@
+name: Bug report
+description: Report reproducible ClipBridge behavior that is not security-sensitive.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include clipboard contents, pairing QR codes or URIs, credentials, private keys, or other personal data. Report security issues through SECURITY.md instead.
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android device and version
+      placeholder: Pixel 8, Android 16
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network type
+      options:
+        - Private home network
+        - Private work network
+        - Guest or isolated network
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use harmless sample text such as "ClipBridge test".
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed clipboard content, pairing data, credentials, and personal information from this report.
+          required: true

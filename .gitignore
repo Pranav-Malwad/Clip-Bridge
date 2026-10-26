@@ -1,4 +1,6 @@
 .idea/
+.vscode/
+.vs/
 .gradle/
 .kotlin/
 .tools/
@@ -9,5 +11,34 @@ dist/
 **/obj/
 **/build/
 *.user
+*.suo
+*.log
+
+# Local environment and machine-specific configuration
+.env
+.env.*
+!.env.example
 local.properties
+keystore.properties
+signing.properties
+
+# Signing certificates and private keys
+*.jks
+*.keystore
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+
+# Runtime state and local packages
+*.apk
+*.aab
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+ClipBridge.settings.json
+ClipBridge.pairing.json
 

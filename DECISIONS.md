@@ -69,3 +69,12 @@ This file records product and engineering decisions made for the initial ClipBri
 
 - Internet relay, accounts, multi-device pairing, clipboard history, images, files, formatted text, custom keyboard integration, accessibility services, and non-Windows desktop clients.
 - Code signing and store publication credentials; distributable development builds are produced locally, while public release signing requires owner-controlled certificates/accounts.
+
+## Public Repository Release
+
+- The source is published under the MIT License to permit inspection, modification, and redistribution with attribution and without warranty.
+- Generated binaries, runtime state, environment files, certificates, private keys, Android keystores, and signing-property files are excluded from Git.
+- Pull requests run separate least-privilege Windows/.NET and Linux/Android verification jobs. CI produces validation artifacts locally inside its runner but does not publish unsigned releases.
+- Dependabot monitors NuGet, Gradle, and GitHub Actions dependencies weekly; dependency updates still require tests and review before merge.
+- Security reports use GitHub Private Vulnerability Reporting. Public issues must never contain vulnerability details, clipboard contents, pairing invitations, credentials, or personal information.
+- Public source availability is not represented as an independent security audit. Production binary distribution remains blocked on owner-controlled Windows and Android signing, physical-device validation, checksums, and release review.
