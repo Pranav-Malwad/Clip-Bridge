@@ -23,6 +23,8 @@ public sealed class ServerIntegrationTests
         using var client = new ClientWebSocket();
         await client.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/clipbridge"), TestContext.Current.CancellationToken);
 
+        await AuthenticateAsync(client, secret);
+
         var toWindows = ClipboardProtocol.Encrypt(
             "phone to laptop",
             TransferDirection.AndroidToWindows,
@@ -45,6 +47,38 @@ public sealed class ServerIntegrationTests
         Assert.NotNull(envelope);
         var decoded = ClipboardProtocol.Decrypt(envelope, secret, DateTimeOffset.UtcNow, new ReplayCache());
         Assert.Equal("laptop to phone", decoded.Text);
+    }
+
+    [Fact]
+    public async Task UnauthenticatedConnectionCannotDisplacePairedClient()
+    {
+        var secret = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
+        var port = FindFreePort();
+        await using var server = new ClipBridgeServer(secret, port);
+        await server.StartAsync(TestContext.Current.CancellationToken);
+        using var paired = new ClientWebSocket();
+        await paired.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/clipbridge"), TestContext.Current.CancellationToken);
+        await AuthenticateAsync(paired, secret);
+
+        using var attacker = new ClientWebSocket();
+        await attacker.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/clipbridge"), TestContext.Current.CancellationToken);
+        await server.SendTextAsync("still paired", TestContext.Current.CancellationToken);
+
+        var buffer = new byte[4096];
+        var response = await paired.ReceiveAsync(buffer, TestContext.Current.CancellationToken);
+        var envelope = ClipboardProtocol.Deserialize(Encoding.UTF8.GetString(buffer, 0, response.Count));
+        Assert.NotNull(envelope);
+        Assert.Equal("still paired", ClipboardProtocol.Decrypt(envelope, secret, DateTimeOffset.UtcNow, new ReplayCache()).Text);
+    }
+
+    private static Task AuthenticateAsync(ClientWebSocket client, byte[] secret)
+    {
+        var hello = ClipboardProtocol.Encrypt("", TransferDirection.AndroidToWindows, secret, DateTimeOffset.UtcNow);
+        return client.SendAsync(
+            Encoding.UTF8.GetBytes(ClipboardProtocol.Serialize(hello)),
+            WebSocketMessageType.Text,
+            true,
+            TestContext.Current.CancellationToken);
     }
 
     private static int FindFreePort()

@@ -70,4 +70,15 @@ class ClipboardProtocolTest {
 
         assertEquals("interop ✓", ClipboardProtocol.decrypt(envelope, secret, now, ReplayCache()).text)
     }
+
+    @Test
+    fun extremeTimestampIsRejectedWithoutOverflow() {
+        val envelope = ClipboardProtocol.encrypt("late", Direction.WINDOWS_TO_ANDROID, secret, now)
+            .copy(timestampUnixSeconds = Long.MIN_VALUE)
+
+        assertEquals(
+            DecryptFailure.EXPIRED,
+            ClipboardProtocol.decrypt(envelope, secret, now, ReplayCache()).failure
+        )
+    }
 }

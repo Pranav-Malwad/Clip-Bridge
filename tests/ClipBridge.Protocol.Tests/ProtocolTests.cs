@@ -110,4 +110,32 @@ public sealed class ProtocolTests
     {
         Assert.Throws<FormatException>(() => PairingUri.Parse(value));
     }
+
+    [Fact]
+    public void NullCiphertextIsRejectedWithoutThrowing()
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        var envelope = new ClipboardEnvelope(
+            1, Guid.NewGuid().ToString("N"), now.ToUnixTimeSeconds(),
+            TransferDirection.AndroidToWindows, "AAECAwQFBgcICQoL", null!, "AAAAAAAAAAAAAAAAAAAAAA==");
+
+        var result = ClipboardProtocol.Decrypt(envelope, Secret, now, new ReplayCache());
+
+        Assert.Equal(DecryptFailure.InvalidEnvelope, result.Failure);
+    }
+
+    [Theory]
+    [InlineData(long.MinValue)]
+    [InlineData(long.MaxValue)]
+    public void ExtremeTimestampIsRejectedWithoutOverflow(long timestamp)
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        var envelope = new ClipboardEnvelope(
+            1, Guid.NewGuid().ToString("N"), timestamp,
+            TransferDirection.AndroidToWindows, "AAECAwQFBgcICQoL", "", "AAAAAAAAAAAAAAAAAAAAAA==");
+
+        var result = ClipboardProtocol.Decrypt(envelope, Secret, now, new ReplayCache());
+
+        Assert.Equal(DecryptFailure.Expired, result.Failure);
+    }
 }

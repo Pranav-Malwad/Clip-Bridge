@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         store = PairingStore(this)
         requestNotificationPermission()
-        if (store.load() != null) startSync()
+        if (store.load() != null && store.isSyncEnabled()) startSync()
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF8FAFC)) {
@@ -88,10 +88,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startSync() {
+        store.setSyncEnabled(true)
         ContextCompat.startForegroundService(this, Intent(this, SyncService::class.java).setAction(SyncService.ACTION_START))
     }
 
     private fun stopSync() {
+        store.setSyncEnabled(false)
         startService(Intent(this, SyncService::class.java).setAction(SyncService.ACTION_STOP))
     }
 

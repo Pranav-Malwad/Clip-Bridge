@@ -14,7 +14,6 @@ import com.clipbridge.app.pairing.PairingInfo
 import com.clipbridge.app.pairing.PairingStore
 import com.clipbridge.app.protocol.ClipboardProtocol
 import com.clipbridge.app.protocol.Direction
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -24,12 +23,13 @@ import okhttp3.WebSocketListener
 
 class SyncService : Service() {
     private val handler = Handler(Looper.getMainLooper())
-    private val pending = ConcurrentLinkedQueue<String>()
+    private val pending = PendingTextQueue(20)
     private val client = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
     private var socket: WebSocket? = null
     private var pairing: PairingInfo? = null
     private var processor: InboundMessageProcessor? = null
     private var running = false
+    private var connected = false
     private var reconnectDelay = 1_000L
 
     override fun onCreate() {
@@ -42,6 +42,7 @@ class SyncService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 running = false
+                PairingStore(this).setSyncEnabled(false)
                 SyncState.update(ConnectionStatus.PAUSED, "Clipboard sync is paused.")
                 stopSelf()
                 return START_NOT_STICKY
@@ -49,15 +50,21 @@ class SyncService : Service() {
             ACTION_SEND_TEXT -> intent.getStringExtra(EXTRA_TEXT)?.let(pending::add)
         }
 
-        pairing = PairingStore(this).load()
-        if (pairing == null) {
+        val storedPairing = PairingStore(this).load()
+        if (storedPairing == null) {
             SyncState.update(ConnectionStatus.UNPAIRED, "Pair this phone before sending text.")
             stopSelf()
             return START_NOT_STICKY
         }
 
+        if (pairing?.secret?.contentEquals(storedPairing.secret) != true) {
+            processor = InboundMessageProcessor(storedPairing.secret)
+        }
+        pairing = storedPairing
+
         running = true
-        if (socket == null) connect()
+        PairingStore(this).setSyncEnabled(true)
+        if (connected) drainPending() else if (socket == null) connect()
         return START_STICKY
     }
 
@@ -65,17 +72,15 @@ class SyncService : Service() {
         val paired = pairing ?: return
         SyncState.update(ConnectionStatus.CONNECTING, "Connecting to ${paired.name}…")
         updateOngoing("Connecting to ${paired.name}…")
-        processor = InboundMessageProcessor(paired.secret)
         val request = Request.Builder().url("ws://${paired.host}:${paired.port}/clipbridge").build()
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 reconnectDelay = 1_000L
+                connected = true
                 SyncState.update(ConnectionStatus.CONNECTED, "Connected to ${paired.name}")
                 updateOngoing("Connected to ${paired.name}")
-                while (true) {
-                    val text = pending.poll() ?: break
-                    sendNow(webSocket, text, paired)
-                }
+                sendNow(webSocket, "", paired)
+                drainPending()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -84,22 +89,35 @@ class SyncService : Service() {
             }
 
             override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+                connected = false
                 socket = null
                 SyncState.update(ConnectionStatus.ERROR, "Cannot reach ${paired.name}; retrying.")
                 updateOngoing("Disconnected; retrying…")
                 scheduleReconnect()
             }
 
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                connected = false
+                webSocket.close(code, reason)
+            }
+
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                connected = false
                 socket = null
                 if (running) scheduleReconnect()
             }
         })
     }
 
-    private fun sendNow(webSocket: WebSocket, text: String, paired: PairingInfo) {
+    private fun drainPending() {
+        val active = socket ?: return
+        val paired = pairing ?: return
+        pending.drain { text -> sendNow(active, text, paired) }
+    }
+
+    private fun sendNow(webSocket: WebSocket, text: String, paired: PairingInfo): Boolean {
         val envelope = ClipboardProtocol.encrypt(text, Direction.ANDROID_TO_WINDOWS, paired.secret)
-        if (!webSocket.send(ClipboardProtocol.serialize(envelope))) pending.add(text)
+        return webSocket.send(ClipboardProtocol.serialize(envelope))
     }
 
     private fun scheduleReconnect() {
@@ -156,6 +174,7 @@ class SyncService : Service() {
 
     override fun onDestroy() {
         running = false
+        connected = false
         handler.removeCallbacksAndMessages(null)
         socket?.cancel()
         socket = null

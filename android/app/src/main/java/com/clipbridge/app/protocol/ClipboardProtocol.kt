@@ -109,7 +109,9 @@ object ClipboardProtocol {
         if (envelope.version != CURRENT_VERSION || !envelope.messageId.matches(Regex("[0-9a-fA-F]{32}"))) {
             return DecryptResult(failure = DecryptFailure.INVALID_ENVELOPE)
         }
-        if (kotlin.math.abs(now.epochSecond - envelope.timestampUnixSeconds) > ALLOWED_AGE_SECONDS) {
+        if (envelope.timestampUnixSeconds < now.epochSecond - ALLOWED_AGE_SECONDS ||
+            envelope.timestampUnixSeconds > now.epochSecond + ALLOWED_AGE_SECONDS
+        ) {
             return DecryptResult(failure = DecryptFailure.EXPIRED)
         }
 

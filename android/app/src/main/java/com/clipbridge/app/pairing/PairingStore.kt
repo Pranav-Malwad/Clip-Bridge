@@ -25,7 +25,14 @@ class PairingStore(context: Context) {
         preferences.edit().clear().apply()
     }
 
+    fun isSyncEnabled(): Boolean = preferences.getBoolean(KEY_SYNC_ENABLED, false)
+
+    fun setSyncEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_SYNC_ENABLED, enabled).apply()
+    }
+
     private companion object {
         const val KEY_URI = "pairing_uri"
+        const val KEY_SYNC_ENABLED = "sync_enabled"
     }
 }

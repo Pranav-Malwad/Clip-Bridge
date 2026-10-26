@@ -39,6 +39,9 @@ object PairingUri {
         }
     }
 
-    private fun encode(value: String) = URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
-    private fun decode(value: String) = URLDecoder.decode(value, StandardCharsets.UTF_8)
+    @Suppress("DEPRECATION")
+    private fun encode(value: String) = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+
+    @Suppress("DEPRECATION")
+    private fun decode(value: String) = URLDecoder.decode(value, "UTF-8")
 }

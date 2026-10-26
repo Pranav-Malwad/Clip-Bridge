@@ -46,7 +46,17 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
         {
             if (socket.State == WebSocketState.Open)
             {
-                await socket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await socket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception error) when (error is WebSocketException or ObjectDisposedException)
+                {
+                    if (Interlocked.CompareExchange(ref _client, null, socket) == socket)
+                    {
+                        ConnectionChanged?.Invoke(false);
+                    }
+                }
             }
         }
         finally
@@ -64,47 +74,55 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
         }
 
         using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+        var buffer = new byte[ClipboardProtocol.MaxPayloadBytes * 2];
+        string? firstMessage;
+        try
+        {
+            firstMessage = await ReceiveTextAsync(socket, buffer, context.RequestAborted).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (WebSocketException)
+        {
+            return;
+        }
+        if (firstMessage is null)
+        {
+            return;
+        }
+
+        var authentication = _processor.Process(firstMessage);
+        if (!authentication.IsSuccess)
+        {
+            await SafeCloseAsync(socket, WebSocketCloseStatus.PolicyViolation, "Authentication failed.").ConfigureAwait(false);
+            return;
+        }
+
         var previous = Interlocked.Exchange(ref _client, socket);
         if (previous is { State: WebSocketState.Open })
         {
-            await previous.CloseAsync(WebSocketCloseStatus.PolicyViolation, "A newer paired device connected.", CancellationToken.None)
+            await SafeCloseAsync(previous, WebSocketCloseStatus.PolicyViolation, "A newer paired device connected.")
                 .ConfigureAwait(false);
         }
 
         ConnectionChanged?.Invoke(true);
-        var buffer = new byte[ClipboardProtocol.MaxPayloadBytes * 2];
+        if (!string.IsNullOrEmpty(authentication.Text))
+        {
+            TextReceived?.Invoke(authentication.Text);
+        }
         try
         {
             while (socket.State == WebSocketState.Open)
             {
-                using var message = new MemoryStream();
-                WebSocketReceiveResult result;
-                do
+                var json = await ReceiveTextAsync(socket, buffer, context.RequestAborted).ConfigureAwait(false);
+                if (json is null)
                 {
-                    result = await socket.ReceiveAsync(buffer, context.RequestAborted).ConfigureAwait(false);
-                    if (result.MessageType == WebSocketMessageType.Close)
-                    {
-                        await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None)
-                            .ConfigureAwait(false);
-                        return;
-                    }
-
-                    if (message.Length + result.Count > buffer.Length)
-                    {
-                        await socket.CloseAsync(WebSocketCloseStatus.MessageTooBig, "Frame too large.", CancellationToken.None)
-                            .ConfigureAwait(false);
-                        return;
-                    }
-
-                    message.Write(buffer, 0, result.Count);
-                } while (!result.EndOfMessage);
-
-                if (result.MessageType != WebSocketMessageType.Text)
-                {
-                    continue;
+                    return;
                 }
 
-                var decoded = _processor.Process(Encoding.UTF8.GetString(message.ToArray()));
+                var decoded = _processor.Process(json);
                 if (decoded.IsSuccess && decoded.Text is not null)
                 {
                     TextReceived?.Invoke(decoded.Text);
@@ -119,8 +137,51 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
         }
         finally
         {
-            Interlocked.CompareExchange(ref _client, null, socket);
-            ConnectionChanged?.Invoke(false);
+            if (Interlocked.CompareExchange(ref _client, null, socket) == socket)
+            {
+                ConnectionChanged?.Invoke(false);
+            }
+        }
+    }
+
+    private static async Task<string?> ReceiveTextAsync(WebSocket socket, byte[] buffer, CancellationToken cancellationToken)
+    {
+        using var message = new MemoryStream();
+        WebSocketReceiveResult result;
+        do
+        {
+            result = await socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                await SafeCloseAsync(socket, WebSocketCloseStatus.NormalClosure, null).ConfigureAwait(false);
+                return null;
+            }
+            if (message.Length + result.Count > buffer.Length)
+            {
+                await SafeCloseAsync(socket, WebSocketCloseStatus.MessageTooBig, "Frame too large.").ConfigureAwait(false);
+                return null;
+            }
+            message.Write(buffer, 0, result.Count);
+        } while (!result.EndOfMessage);
+
+        return result.MessageType == WebSocketMessageType.Text
+            ? Encoding.UTF8.GetString(message.ToArray())
+            : null;
+    }
+
+    private static async Task SafeCloseAsync(WebSocket socket, WebSocketCloseStatus status, string? description)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+            {
+                await socket.CloseAsync(status, description, timeout.Token).ConfigureAwait(false);
+            }
+        }
+        catch (Exception error) when (error is WebSocketException or OperationCanceledException or ObjectDisposedException)
+        {
+            socket.Abort();
         }
     }
 
@@ -129,8 +190,7 @@ public sealed class ClipBridgeServer(byte[] secret, int port) : IAsyncDisposable
         var socket = Interlocked.Exchange(ref _client, null);
         if (socket is { State: WebSocketState.Open })
         {
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "ClipBridge is closing.", CancellationToken.None)
-                .ConfigureAwait(false);
+            await SafeCloseAsync(socket, WebSocketCloseStatus.NormalClosure, "ClipBridge is closing.").ConfigureAwait(false);
         }
 
         if (_application is not null)

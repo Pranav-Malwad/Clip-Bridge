@@ -15,6 +15,7 @@ class ShareActivity : Activity() {
         when {
             text == null -> Toast.makeText(this, "ClipBridge can only send text up to 256 KiB.", Toast.LENGTH_LONG).show()
             PairingStore(this).load() == null -> Toast.makeText(this, "Open ClipBridge and pair your PC first.", Toast.LENGTH_LONG).show()
+            !PairingStore(this).isSyncEnabled() -> Toast.makeText(this, "ClipBridge is paused. Enable sync first.", Toast.LENGTH_LONG).show()
             else -> {
                 val serviceIntent = Intent(this, SyncService::class.java)
                     .setAction(SyncService.ACTION_SEND_TEXT)

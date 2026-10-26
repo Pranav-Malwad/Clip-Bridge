@@ -58,13 +58,16 @@ public static class ClipboardProtocol
         if (envelope.Version != CurrentVersion ||
             !Guid.TryParseExact(envelope.MessageId, "N", out _) ||
             string.IsNullOrWhiteSpace(envelope.Nonce) ||
+            envelope.Ciphertext is null ||
             string.IsNullOrWhiteSpace(envelope.Tag))
         {
             return DecryptResult.Failed(DecryptFailure.InvalidEnvelope);
         }
 
         var nowSeconds = now.ToUnixTimeSeconds();
-        if (Math.Abs(nowSeconds - envelope.TimestampUnixSeconds) > AllowedAge.TotalSeconds)
+        var allowedSeconds = (long)AllowedAge.TotalSeconds;
+        if (envelope.TimestampUnixSeconds < nowSeconds - allowedSeconds ||
+            envelope.TimestampUnixSeconds > nowSeconds + allowedSeconds)
         {
             return DecryptResult.Failed(DecryptFailure.Expired);
         }
